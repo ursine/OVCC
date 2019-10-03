@@ -26,6 +26,11 @@ typedef int BOOL;
 #include "fileops.h"
 #include "defines.h"
 #include "mpu.h"
+#include "fpu.h"
+#include "gpu.h"
+#include "gpuclock.h"
+
+#define GPU_Nil_Arg ((unsigned short)0)
 
 static char moduleName[4] = { "MPU" };
 
@@ -33,15 +38,18 @@ static char IniFile[MAX_PATH] = { 0 };
 
 typedef void (*ASSERTINTERUPT) (unsigned char,unsigned char);
 typedef void (*DMAMEMPOINTERS) (MEMREAD8, MEMWRITE8);
+typedef void (*MMUMEMPOINTERS) (MMUREAD8, MMUWRITE8);
 static void (*AssertInt)(unsigned char,unsigned char)=NULL;
 static unsigned char (*MemRead8)(unsigned short)=NULL;
 static void (*MemWrite8)(unsigned char,unsigned short)=NULL;
+static unsigned char (*MmuRead8)(unsigned char, unsigned short)=NULL;
+static void (*MmuWrite8)(unsigned char,unsigned char, unsigned short)=NULL;
 static void LoadConfig(void);
 static void SaveConfig(void);
 static void BuildMenu(void);
 static void UpdateMenu(void);
 
-#define MAX_PARAMS 4
+#define MAX_PARAMS 5
 
 unsigned char BaseAddr = 0x60;
 
@@ -56,36 +64,22 @@ enum Registers
 	REG_Param2L,
 	REG_Param3H,
 	REG_Param3L,
+	REG_Param4H,
+	REG_Param4L,
+	REG_Param5H,
+	REG_Param5L,
+	REG_Param6H,
+	REG_Param6L,
+	REG_Param7H,
+	REG_Param7L,
 	REG_ParamCnt
 };
 
-enum Commands
-{
-	CMD_Check,
-	CMD_Test,
-	CMD_CompareDbl,
-	CMD_MultDbl,
-	CMD_DivDbl,
-	CMD_AddDbl,
-	CMD_SubDbl,
-	CMD_NegDbl,
-	CMD_PowDbl,
-	CMD_SqrtDbl,
-	CMD_ExpDbl,
-	CMD_LogDbl,
-	CMD_Log10Dbl,
-	CMD_Inv,
-	CMD_ltod,
-	CMD_dtol,
-	CMD_ftod,
-	CMD_dtof,
-	CMD_SetScreen = 64,
-	CMD_SetColor,
-	CMD_SetPixel,
-	CMD_DrawLine
-};
-
 unsigned short int Params[MAX_PARAMS];
+
+#ifdef GPU_MODE_QUEUE
+#define GPU_MODE_QUEUE
+#endif
 
 AG_MenuItem *menuAnchor = NULL;
 // AG_MenuItem *itemMenu = NULL;
@@ -161,8 +155,16 @@ void ExecuteCommand(unsigned char cmd)
 			Log10Dbl(Params[0], Params[1]);
 		break;
 
-		case CMD_Inv:
+		case CMD_InvDbl:
 			InvDbl(Params[0], Params[1]);
+		break;
+
+		case CMD_SinDbl:
+			SinDbl(Params[0], Params[1]);
+		break;
+
+		case CMD_CosDbl:
+			CosDbl(Params[0], Params[1]);
 		break;
 
 		case CMD_ltod:
@@ -181,20 +183,80 @@ void ExecuteCommand(unsigned char cmd)
 			dtof(Params[0], Params[1]);
 		break;
 
-		case CMD_SetScreen:
-			SetScreen(Params[0], Params[1], Params[2], Params[3]);
+		case CMD_GetQueueLen:
+			GetQueueLen(Params[0]);
+		break;
+
+		case CMD_GetTicks:
+			GetHighResTicks(Params[0]);
+		break;
+
+		case CMD_NewScreen:
+			NewScreen(Params[0], Params[1], Params[2], Params[3], Params[4]);
+		break;
+
+		case CMD_DestroyScreen:
+#ifdef GPU_MODE_QUEUE
+			QueueGPUrequest(cmd, Params[0]);
+#else			
+			DestroyScreen(Params[0]);
+#endif
 		break;
 
 		case CMD_SetColor:
-			SetColor(Params[0]);
+#ifdef GPU_MODE_QUEUE
+			QueueGPUrequest(cmd, Params[0], Params[1]);
+#else			
+			SetColor(Params[0], Params[1]);
+#endif
 		break;
 
 		case CMD_SetPixel:
-			SetPixel(Params[0], Params[1]);
+#ifdef GPU_MODE_QUEUE
+			QueueGPUrequest(cmd, Params[0], Params[1], Params[2]);
+#else			
+			SetPixel(Params[0], Params[1], Params[2]);
+#endif
 		break;
 
 		case CMD_DrawLine:
-			DrawLine(Params[0], Params[1], Params[2], Params[3]);
+#ifdef GPU_MODE_QUEUE
+				QueueGPUrequest(cmd, Params[0], Params[1], Params[2], Params[3], Params[4]);
+#else			
+				DrawLine(Params[0], Params[1], Params[2], Params[3]), Params[4];
+#endif
+		break;
+
+		case CMD_NewTexture:
+			NewTexture(Params[0], Params[1], Params[2], Params[3]);
+		break;
+
+		case CMD_DestroyTexture:
+#ifdef GPU_MODE_QUEUE
+			QueueGPUrequest(cmd, Params[0]);
+#else			
+			DestroyTexture(Params[0]);
+#endif
+		break;
+
+		case CMD_SetTextureTransparency:
+#ifdef GPU_MODE_QUEUE
+			QueueGPUrequest(cmd, Params[0], Params[1], Params[2]);
+#else			
+			SetTextureTransparency(Params[0], Params[1], Params[2]);
+#endif
+		break;
+
+		case CMD_LoadTexture:
+#ifdef GPU_MODE_QUEUE
+			QueueGPUrequest(cmd, Params[0], Params[1], Params[2]);
+#else			
+			LoadTexture(Params[0], Params[1], Params[2]);
+#endif
+		break;
+
+		case CMD_RenderTexture:
+			RenderTexture(Params[0], Params[1], Params[2], Params[3], Params[4]);
 		break;
 
 		default:
@@ -232,6 +294,17 @@ unsigned char MemRead(unsigned short Address)
 	return(MemRead8(Address));
 }
 
+void MmuWrite(unsigned char Data, unsigned char Bank, unsigned short Address)
+{
+	MmuWrite8(Data,Bank,Address);
+	return;
+}
+
+unsigned char MmuRead(unsigned char Bank, unsigned short Address)
+{
+	return(MmuRead8(Bank,Address));
+}
+
 void ADDCALL ModuleName(char *ModName, AG_MenuItem *Temp)
 {
 	menuAnchor = Temp;
@@ -244,6 +317,9 @@ void ADDCALL ModuleName(char *ModName, AG_MenuItem *Temp)
 
 	// fprintf(stderr, "MPU : ModuleName\n");
 
+#ifdef GPU_MODE_QUEUE
+	StartGPUQueue();
+#endif
 	return ;
 }
 
@@ -256,6 +332,9 @@ void ADDCALL ModuleConfig(unsigned char func)
 		// AG_MenuDel(itemLoadHDD);
 		// AG_MenuDel(itemMenu);
 		// AG_MenuDel(itemSeperator);
+#ifdef GPU_MODE_QUEUE
+		StopGPUqueue();
+#endif
 		break;
 
 	case 1: // Update ini file
@@ -287,6 +366,8 @@ void ADDCALL PackPortWrite(unsigned char Port, unsigned char Data)
 		case REG_Param2L:
 		case REG_Param3H:
 		case REG_Param3L:
+		case REG_Param4H:
+		case REG_Param4L:
 		{
 			int idx = (Port-BaseAddr-1)^1;
 			*((unsigned char*)Params+(idx)) = Data;
@@ -306,13 +387,23 @@ void ADDCALL PackPortWrite(unsigned char Port, unsigned char Data)
 // 	}
 // }
 
-// //This captures the pointers to the MemRead8 and MemWrite8 functions. This allows the DLL to do DMA xfers with CPU ram.
+// This captures the pointers to the MemRead8 and MemWrite8 functions. This allows the DLL to do DMA xfers with CPU ram.
 
 void ADDCALL MemPointers(MEMREAD8 Temp1, MEMWRITE8 Temp2)
 {
 	MemRead8=Temp1;
 	MemWrite8=Temp2;
-	//fprintf(stderr, "MPU : MemPointers\n");
+	// fprintf(stderr, "MPU : MemPointers\n");
+	return;
+}
+
+// This captures the pointers to the MemRead8 and MemWrite8 functions. This allows the DLL to do DMA xfers with MMU ram.
+
+void ADDCALL MmuPointers(MMUREAD8 Temp1, MMUWRITE8 Temp2)
+{
+	MmuRead8=Temp1;
+	MmuWrite8=Temp2;
+	// fprintf(stderr, "MPU : MmuPointers\n");
 	return;
 }
 

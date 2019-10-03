@@ -34,45 +34,72 @@ extern "C"
 {
 #endif
 
+#ifndef GPU_MODE_QUEUE
+#define GPU_MODE_QUEUE
+#endif
+
+typedef unsigned short ushort;
+typedef unsigned char uchar;
+typedef unsigned short* pushort;
+typedef unsigned char* puchar;
+
 void ADDCALL ModuleName(char *, AG_MenuItem *);
-void ADDCALL ModuleConfig(unsigned char);
-void ADDCALL PackPortWrite(unsigned char, unsigned char);
-unsigned char ADDCALL PackPortRead(unsigned char);
-typedef unsigned char (*MEMREAD8)(unsigned short);
-typedef void (*MEMWRITE8)(unsigned char,unsigned short);
+void ADDCALL ModuleConfig(uchar);
+void ADDCALL PackPortWrite(uchar, uchar);
+unsigned char ADDCALL PackPortRead(uchar);
+typedef unsigned char (*MEMREAD8)(ushort);
+typedef void (*MEMWRITE8)(uchar, ushort);
+typedef unsigned char (*MMUREAD8)(uchar, ushort);
+typedef void (*MMUWRITE8)(uchar, uchar, ushort);
 void ADDCALL MemPointers(MEMREAD8, MEMWRITE8);
-unsigned char ADDCALL PakMemRead8 (unsigned short);
+void ADDCALL MmuPointers(MMUREAD8, MMUWRITE8);
+unsigned char ADDCALL PakMemRead8(ushort);
 void ADDCALL ModuleStatus (char *);
 //void ADDCALL SetIniPath (char *);
+unsigned char MemRead(ushort);
+void MemWrite(uchar, ushort);
+void MmuWrite(uchar, uchar, ushort);
+unsigned char MmuRead(uchar, ushort);
 
 #ifdef __cplusplus
 } // __cplusplus defined.
 #endif
 
-void MemWrite(unsigned char,unsigned short );
-unsigned char MemRead(unsigned short );
-
-void CompareDbl(unsigned short, unsigned short, unsigned short);
-void MultDbl(unsigned short, unsigned short, unsigned short);
-void DivDbl(unsigned short, unsigned short, unsigned short);
-void AddDbl(unsigned short, unsigned short, unsigned short);
-void SubDbl(unsigned short, unsigned short, unsigned short);
-void NegDbl(unsigned short, unsigned short);
-void PowDbl(unsigned short, unsigned short, unsigned short);
-void SqrtDbl(unsigned short, unsigned short);
-void ExpDbl(unsigned short, unsigned short);
-void LogDbl(unsigned short, unsigned short);
-void Log10Dbl(unsigned short, unsigned short);
-void InvDbl(unsigned short, unsigned short);
-void ltod(unsigned short, unsigned short);
-void dtol(unsigned short, unsigned short);
-void ftod(unsigned short, unsigned short);
-void dtof(unsigned short, unsigned short);
-
-void SetScreen(unsigned short, unsigned short, unsigned short, unsigned short);
-void SetColor(unsigned short );
-void SetPixel(unsigned short, unsigned short);
-void DrawLine(unsigned short, unsigned short, unsigned short, unsigned short);
+enum Commands
+{
+	CMD_Check,
+	CMD_Test,
+	CMD_CompareDbl,
+	CMD_MultDbl,
+	CMD_DivDbl,
+	CMD_AddDbl,
+	CMD_SubDbl,
+	CMD_NegDbl,
+	CMD_PowDbl,
+	CMD_SqrtDbl,
+	CMD_ExpDbl,
+	CMD_LogDbl,
+	CMD_Log10Dbl,
+	CMD_InvDbl,
+	CMD_SinDbl,
+	CMD_CosDbl,
+	CMD_ltod,
+	CMD_dtol,
+	CMD_ftod,
+	CMD_dtof,
+	CMD_GetQueueLen = 62,
+	CMD_GetTicks = 63,
+	CMD_NewScreen = 64,
+	CMD_DestroyScreen,
+	CMD_SetColor,
+	CMD_SetPixel,
+	CMD_DrawLine,
+	CMD_NewTexture,
+	CMD_DestroyTexture,
+	CMD_SetTextureTransparency,
+	CMD_LoadTexture,
+	CMD_RenderTexture
+};
 
 
 #endif

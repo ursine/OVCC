@@ -19,70 +19,18 @@
 
 #include <stdio.h>
 #include "mpu.h"
-
-union Data
-{
-	unsigned long long llval;
-	double dval;
-	unsigned long lval;
-	unsigned char bytes[8];
-};
-
-typedef union Data PDP1data;
-typedef union Data IEEE754data;
-
-long ReadPDP14bytes(unsigned short int address)
-{
-	PDP1data pdp1data;
-
-	pdp1data.bytes[3] = MemRead(address);
-	pdp1data.bytes[2] = MemRead(address+1);
-	pdp1data.bytes[1] = MemRead(address+2);
-	pdp1data.bytes[0] = MemRead(address+3);
-
-	return pdp1data.lval;
-}
-
-void WritePDP14bytes(unsigned short int address, PDP1data pdp1data)
-{
-	MemWrite(pdp1data.bytes[3], address);
-	MemWrite(pdp1data.bytes[2], address+1);
-	MemWrite(pdp1data.bytes[1], address+2);
-	MemWrite(pdp1data.bytes[0], address+3);
-}
-
-PDP1data ReadPDP18bytes(unsigned short int address)
-{
-	PDP1data PDP1data;
-
-	PDP1data.bytes[7] = MemRead(address);
-	PDP1data.bytes[6] = MemRead(address+1);
-	PDP1data.bytes[5] = MemRead(address+2);
-	PDP1data.bytes[4] = MemRead(address+3);
-	PDP1data.bytes[3] = MemRead(address+4);
-	PDP1data.bytes[2] = MemRead(address+5);
-	PDP1data.bytes[1] = MemRead(address+6);
-	PDP1data.bytes[0] = MemRead(address+7);
-
-	return PDP1data;
-}
-
-void WritePDP18bytes(unsigned short int address, PDP1data PDP1data)
-{
-	MemWrite(PDP1data.bytes[7], address);
-	MemWrite(PDP1data.bytes[6], address+1);
-	MemWrite(PDP1data.bytes[5], address+2);
-	MemWrite(PDP1data.bytes[4], address+3);
-	MemWrite(PDP1data.bytes[3], address+4);
-	MemWrite(PDP1data.bytes[2], address+5);
-	MemWrite(PDP1data.bytes[1], address+6);
-	MemWrite(PDP1data.bytes[0], address+7);
-}
+#include "gpu.h"
+#include "dma.h"
 
 double ConvertDBLPDP1toIEEE754(PDP1data PDP1data)
 {
 	IEEE754data iee754;
 	unsigned long long signbit, exp, mantissa;
+
+	if (PDP1data.llval == 0) 
+	{
+		return 0.0;
+	}
 
 	signbit  =  PDP1data.llval & 0x8000000000000000;
 	exp      = (PDP1data.llval & 0x00000000000000ff) + 0x37e;
@@ -101,6 +49,15 @@ PDP1data ConvertDblIEEE754toPDP1(double dvalue)
 
 	IEEE754data.dval = dvalue;
 
+	// IEEE floats can have a negative zero that PDP1 floats cannot have
+	// if the value is zero then we make it a good zero
+
+	if (IEEE754data.dval == 0.0)
+	{
+		IEEE754data.llval = 0;
+		return IEEE754data;
+	}
+
 	signbit  =   IEEE754data.llval & 0x8000000000000000;
 	exp      = ((IEEE754data.llval & 0x7ff0000000000000)>>52) - 0x37e;
 	mantissa =   IEEE754data.llval & 0x000fffffffffffff;
@@ -116,10 +73,10 @@ void CompareDbl(unsigned short param0, unsigned short param1, unsigned short par
 	double dvalue, dvalue1, dvalue2;
 	char result = 0;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
-	PDP1data = ReadPDP18bytes(param2);
+	PDP1data = ReadCoCo8bytes(param2);
 	dvalue2 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = dvalue1 - dvalue2;
@@ -143,18 +100,19 @@ void MultDbl(unsigned short param0, unsigned short param1, unsigned short param2
 	PDP1data PDP1data;
 	double dvalue, dvalue1, dvalue2;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
-	PDP1data = ReadPDP18bytes(param2);
+	PDP1data = ReadCoCo8bytes(param2);
 	dvalue2 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = dvalue1 * dvalue2;
 
-	// fprintf(stderr, "MPU : MultDbl %f = %f * %f\n", dvalue, dvalue1, dvalue2);
+	//fprintf(stderr, "MPU : MultDbl &p0 = %x, &p1 = %x, &p2 = %x\n", param0, param1, param2);
+	//fprintf(stderr, "MPU : MultDbl %f = %f * %f\n", dvalue, dvalue1, dvalue2);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void DivDbl(unsigned short param0, unsigned short param1, unsigned short param2)
@@ -162,10 +120,10 @@ void DivDbl(unsigned short param0, unsigned short param1, unsigned short param2)
 	PDP1data PDP1data;
 	double dvalue, dvalue1, dvalue2;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
-	PDP1data = ReadPDP18bytes(param2);
+	PDP1data = ReadCoCo8bytes(param2);
 	dvalue2 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = dvalue1 / dvalue2;
@@ -173,7 +131,7 @@ void DivDbl(unsigned short param0, unsigned short param1, unsigned short param2)
 	// fprintf(stderr, "MPU : DivDbl %f = %f / %f\n", dvalue, dvalue1, dvalue2);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void AddDbl(unsigned short param0, unsigned short param1, unsigned short param2)
@@ -181,10 +139,10 @@ void AddDbl(unsigned short param0, unsigned short param1, unsigned short param2)
 	PDP1data PDP1data;
 	double dvalue, dvalue1, dvalue2;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
-	PDP1data = ReadPDP18bytes(param2);
+	PDP1data = ReadCoCo8bytes(param2);
 	dvalue2 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = dvalue1 + dvalue2;
@@ -192,7 +150,7 @@ void AddDbl(unsigned short param0, unsigned short param1, unsigned short param2)
 	// fprintf(stderr, "MPU : AddltDbl %f = %f + %f\n", dvalue, dvalue1, dvalue2);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void SubDbl(unsigned short param0, unsigned short param1, unsigned short param2)
@@ -200,10 +158,10 @@ void SubDbl(unsigned short param0, unsigned short param1, unsigned short param2)
 	PDP1data PDP1data;
 	double dvalue, dvalue1, dvalue2;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
-	PDP1data = ReadPDP18bytes(param2);
+	PDP1data = ReadCoCo8bytes(param2);
 	dvalue2 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = dvalue1 - dvalue2;
@@ -211,15 +169,15 @@ void SubDbl(unsigned short param0, unsigned short param1, unsigned short param2)
 	// fprintf(stderr, "MPU : SubDbl %f = %f - %f\n", dvalue, dvalue1, dvalue2);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void NegDbl(unsigned short param0, unsigned short param1)
 {
 	PDP1data PDP1data;
-	double dvalue, dvalue1, dvalue2;
+	double dvalue = 0.0, dvalue1, dvalue2;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = -dvalue1;
@@ -227,7 +185,7 @@ void NegDbl(unsigned short param0, unsigned short param1)
 	// fprintf(stderr, "MPU : NegDbl %f = %f\n", dvalue, dvalue1);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void PowDbl(unsigned short param0, unsigned short param1, unsigned short param2)
@@ -235,10 +193,10 @@ void PowDbl(unsigned short param0, unsigned short param1, unsigned short param2)
 	PDP1data PDP1data;
 	double dvalue, dvalue1, dvalue2;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
-	PDP1data = ReadPDP18bytes(param2);
+	PDP1data = ReadCoCo8bytes(param2);
 	dvalue2 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = pow(dvalue1, dvalue2);
@@ -246,7 +204,7 @@ void PowDbl(unsigned short param0, unsigned short param1, unsigned short param2)
 	// fprintf(stderr, "MPU : PowDbl %f = pow(%f, %f)\n", dvalue, dvalue1, dvalue2);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void SqrtDbl(unsigned short param0, unsigned short param1)
@@ -254,7 +212,7 @@ void SqrtDbl(unsigned short param0, unsigned short param1)
 	PDP1data PDP1data;
 	double dvalue, dvalue1, dvalue2;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = sqrt(dvalue1);
@@ -262,7 +220,7 @@ void SqrtDbl(unsigned short param0, unsigned short param1)
 	// fprintf(stderr, "MPU : SqrtDbl %f = sqrt(%f)\n", dvalue, dvalue1);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void ExpDbl(unsigned short param0, unsigned short param1)
@@ -270,7 +228,7 @@ void ExpDbl(unsigned short param0, unsigned short param1)
 	PDP1data PDP1data;
 	double dvalue, dvalue1, dvalue2;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = exp(dvalue1);
@@ -278,7 +236,7 @@ void ExpDbl(unsigned short param0, unsigned short param1)
 	// fprintf(stderr, "MPU : ExpDbl %f = exp(%f)\n", dvalue, dvalue1);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void LogDbl(unsigned short param0, unsigned short param1)
@@ -286,7 +244,7 @@ void LogDbl(unsigned short param0, unsigned short param1)
 	PDP1data PDP1data;
 	double dvalue, dvalue1, dvalue2;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = log(dvalue1);
@@ -294,7 +252,7 @@ void LogDbl(unsigned short param0, unsigned short param1)
 	// fprintf(stderr, "MPU : LogDbl %f = log(%f)\n", dvalue, dvalue1);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void Log10Dbl(unsigned short param0, unsigned short param1)
@@ -302,7 +260,7 @@ void Log10Dbl(unsigned short param0, unsigned short param1)
 	PDP1data PDP1data;
 	double dvalue, dvalue1, dvalue2;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = log10(dvalue1);
@@ -310,7 +268,7 @@ void Log10Dbl(unsigned short param0, unsigned short param1)
 	// fprintf(stderr, "MPU : Log10Dbl %f = log10(%f)\n", dvalue, dvalue1);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void InvDbl(unsigned short param0, unsigned short param1)
@@ -318,7 +276,7 @@ void InvDbl(unsigned short param0, unsigned short param1)
 	PDP1data PDP1data;
 	double dvalue, dvalue1, dvalue2;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
 
 	dvalue = 1.0 / dvalue1;
@@ -326,38 +284,68 @@ void InvDbl(unsigned short param0, unsigned short param1)
 	// fprintf(stderr, "MPU : InvDbl %f = inv(%f)\n", dvalue, dvalue1);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
+}
+
+void SinDbl(unsigned short param0, unsigned short param1)
+{
+	PDP1data PDP1data;
+	double dvalue, dvalue1, dvalue2;
+
+	PDP1data = ReadCoCo8bytes(param1);
+	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
+
+	dvalue = sin(dvalue1);
+	
+	// fprintf(stderr, "MPU : SinDbl %f = sin(%f)\n", dvalue, dvalue1);
+
+	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
+	WriteCoCo8bytes(param0, PDP1data);
+}
+
+void CosDbl(unsigned short param0, unsigned short param1)
+{
+	PDP1data PDP1data;
+	double dvalue, dvalue1, dvalue2;
+
+	PDP1data = ReadCoCo8bytes(param1);
+	dvalue1 = ConvertDBLPDP1toIEEE754(PDP1data);
+
+	dvalue = cos(dvalue1);
+	
+	// fprintf(stderr, "MPU : CosDbl %f = cos(%f)\n", dvalue, dvalue1);
+
+	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void ltod(unsigned short param0, unsigned short param1)
 {
 	PDP1data PDP1data;
-	long lvalue;
+	int lvalue;
 	double dvalue;
 
-	lvalue = ReadPDP14bytes(param1);
-	dvalue = lvalue;
+	lvalue = ReadCoCo4byte(param1);
+	dvalue = (double)lvalue;
 
 	// fprintf(stderr, "MPU : lotd %f = %d\n", dvalue, lvalue);
 
 	PDP1data = ConvertDblIEEE754toPDP1(dvalue);
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void dtol(unsigned short param0, unsigned short param1)
 {
 	PDP1data PDP1data;
-	long lvalue;
 	double dvalue;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	dvalue = ConvertDBLPDP1toIEEE754(PDP1data);
-	lvalue = dvalue;
-	PDP1data.lval = lvalue;
+	PDP1data.lval = dvalue;
 
-	// fprintf(stderr, "MPU : dotl %ld = %lf\n", lvalue, dvalue);
+	// fprintf(stderr, "MPU : dotl %ld = %lf\n", PDP1data.lval, dvalue);
 
-	WritePDP14bytes(param0, PDP1data);
+	WriteCoCo4bytes(param0, PDP1data);
 }
 
 void ftod(unsigned short param0, unsigned short param1)
@@ -366,7 +354,7 @@ void ftod(unsigned short param0, unsigned short param1)
 	long lvalue;
 	double dvalue;
 
-	lvalue = ReadPDP14bytes(param1);
+	lvalue = ReadCoCo4byte(param1);
 	PDP1data.lval = lvalue;
 	PDP1data.bytes[7] = PDP1data.bytes[3];
 	PDP1data.bytes[6] = PDP1data.bytes[2];
@@ -378,7 +366,7 @@ void ftod(unsigned short param0, unsigned short param1)
 	// dvalue = ConvertDBLPDP1toIEEE754(PDP1data);
 	// fprintf(stderr, "MPU : ftod %f\n", dvalue);
 
-	WritePDP18bytes(param0, PDP1data);
+	WriteCoCo8bytes(param0, PDP1data);
 }
 
 void dtof(unsigned short param0, unsigned short param1)
@@ -387,7 +375,7 @@ void dtof(unsigned short param0, unsigned short param1)
 	long lvalue;
 	double dvalue;
 
-	PDP1data = ReadPDP18bytes(param1);
+	PDP1data = ReadCoCo8bytes(param1);
 	// dvalue = ConvertDBLPDP1toIEEE754(PDP1data);
 	PDP1data.lval = PDP1data.lval;
 	PDP1data.bytes[3] = PDP1data.bytes[7];
@@ -397,5 +385,5 @@ void dtof(unsigned short param0, unsigned short param1)
 	
 	// fprintf(stderr, "MPU : dtof %f\n", dvalue);
 
-	WritePDP14bytes(param0, PDP1data);
+	WriteCoCo4bytes(param0, PDP1data);
 }

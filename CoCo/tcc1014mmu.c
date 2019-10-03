@@ -29,6 +29,13 @@ This file is part of VCC (Virtual Color Computer).
 #include "logger.h"
 #include "hd6309.h"
 #include "fileops.h"
+
+#if defined(_WIN64)
+#define MSABI 
+#else
+#define MSABI __attribute__((ms_abi))
+#endif
+
 static unsigned char *MemPages[1024];
 static unsigned short MemPageOffsets[1024];
 static unsigned char *memory=NULL;	//Emulated RAM
@@ -198,6 +205,17 @@ int load_int_rom(char filename[MAX_PATH])
 }
 
 // Coco3 MMU Code
+unsigned char MmuRead8(unsigned char bank, unsigned short address)
+{
+	return MemPages[bank][address & 0x1FFF];
+}
+
+void MmuWrite8(unsigned char data, unsigned char bank, unsigned short address)
+{
+	MemPages[bank][address & 0x1FFF] = data;
+}
+
+// Coco3 MMU Code
 unsigned char MemRead8(unsigned short address)
 {
 	if (address<0xFE00)
@@ -215,7 +233,7 @@ unsigned char MemRead8(unsigned short address)
 	return(PackMem8Read(MemPageOffsets[MmuRegisters[MmuState][address >> 13]] + (address & 0x1FFF)));
 }
 
-extern unsigned char MemRead8_s(unsigned short address)
+unsigned char MSABI MemRead8_s(unsigned short address)
 {
 	if (address<0xFE00)
 	{
@@ -242,7 +260,7 @@ void MemWrite8(unsigned char data, unsigned short address)
 	//	}
 	if (address < 0xFE00)
 	{
-		if (MapType | (MmuRegisters[MmuState][address >> 13] < VectorMaska[CurrentRamConfig]) | (MmuRegisters[MmuState][address >> 13] > VectorMask[CurrentRamConfig]))
+		if (MapType || (MmuRegisters[MmuState][address >> 13] < VectorMaska[CurrentRamConfig]) || (MmuRegisters[MmuState][address >> 13] > VectorMask[CurrentRamConfig]))
 			MemPages[MmuRegisters[MmuState][address >> 13]][address & 0x1FFF] = data;
 		return;
 	}
@@ -254,12 +272,12 @@ void MemWrite8(unsigned char data, unsigned short address)
 	if (RamVectors)	//Address must be $FE00 - $FEFF
 		memory[(0x2000 * VectorMask[CurrentRamConfig]) | (address & 0x1FFF)] = data;
 	else
-		if (MapType | (MmuRegisters[MmuState][address >> 13] < VectorMaska[CurrentRamConfig]) | (MmuRegisters[MmuState][address >> 13] > VectorMask[CurrentRamConfig]))
+		if (MapType || (MmuRegisters[MmuState][address >> 13] < VectorMaska[CurrentRamConfig]) || (MmuRegisters[MmuState][address >> 13] > VectorMask[CurrentRamConfig]))
 			MemPages[MmuRegisters[MmuState][address >> 13]][address & 0x1FFF] = data;
 	return;
 }
 
-extern void MemWrite8_s(unsigned char data, unsigned short address)
+void MSABI MemWrite8_s(unsigned char data, unsigned short address)
 {
 	//	char Message[256]="";
 	//	if ((address>=0xC000) & (address<=0xE000))
@@ -267,32 +285,22 @@ extern void MemWrite8_s(unsigned char data, unsigned short address)
 	//		sprintf(Message,"Writing %i to ROM Address %x\n",data,address);
 	//		WriteLog(Message,TOCONS);
 	//	}
-
 	if (address < 0xFE00)
 	{
-		if (MapType | (MmuRegisters[MmuState][address >> 13] < VectorMaska[CurrentRamConfig]) | (MmuRegisters[MmuState][address >> 13] > VectorMask[CurrentRamConfig]))
-			if (MemPages[MmuRegisters[MmuState][address >> 13]][address & 0x1FFF] != data)
-			{
-				//WriteLog("Memory write 1 incorrect!\n", TOCONS);
-			}
+		if (MapType || (MmuRegisters[MmuState][address >> 13] < VectorMaska[CurrentRamConfig]) || (MmuRegisters[MmuState][address >> 13] > VectorMask[CurrentRamConfig]))
+			MemPages[MmuRegisters[MmuState][address >> 13]][address & 0x1FFF] = data;
 		return;
 	}
 	if (address > 0xFEFF)
 	{
-		//port_write(data, address);
+		port_write(data, address);
 		return;
 	}
 	if (RamVectors)	//Address must be $FE00 - $FEFF
-		if (memory[(0x2000 * VectorMask[CurrentRamConfig]) | (address & 0x1FFF)] != data)
-		{
-			//WriteLog("Memory write 2 incorrect!\n", TOCONS);
-		}
+		memory[(0x2000 * VectorMask[CurrentRamConfig]) | (address & 0x1FFF)] = data;
 	else
-		if (MapType | (MmuRegisters[MmuState][address >> 13] < VectorMaska[CurrentRamConfig]) | (MmuRegisters[MmuState][address >> 13] > VectorMask[CurrentRamConfig]))
-			if (MemPages[MmuRegisters[MmuState][address >> 13]][address & 0x1FFF] != data)
-			{
-				//WriteLog("Memory write 3 incorrect!\n", TOCONS);
-			}
+		if (MapType || (MmuRegisters[MmuState][address >> 13] < VectorMaska[CurrentRamConfig]) || (MmuRegisters[MmuState][address >> 13] > VectorMask[CurrentRamConfig]))
+			MemPages[MmuRegisters[MmuState][address >> 13]][address & 0x1FFF] = data;
 	return;
 }
 
@@ -317,7 +325,7 @@ void fMemWrite8(unsigned char data,unsigned short address)
 {
 	if (address<0xFE00)
 	{
-		if (MapType | (MmuRegisters[MmuState][address>>13] <VectorMaska[CurrentRamConfig]) | (MmuRegisters[MmuState][address>>13] > VectorMask[CurrentRamConfig]))
+		if (MapType || (MmuRegisters[MmuState][address>>13] <VectorMaska[CurrentRamConfig]) || (MmuRegisters[MmuState][address>>13] > VectorMask[CurrentRamConfig]))
 			MemPages[MmuRegisters[MmuState][address>>13]][address & 0x1FFF]=data;
 		return;
 	}
@@ -329,7 +337,7 @@ void fMemWrite8(unsigned char data,unsigned short address)
 	if (RamVectors)	//Address must be $FE00 - $FEFF
 		memory[(0x2000*VectorMask[CurrentRamConfig])|(address & 0x1FFF)]=data;
 	else
-	if (MapType | (MmuRegisters[MmuState][address>>13] <VectorMaska[CurrentRamConfig]) | (MmuRegisters[MmuState][address>>13] > VectorMask[CurrentRamConfig]))
+	if (MapType || (MmuRegisters[MmuState][address>>13] <VectorMaska[CurrentRamConfig]) || (MmuRegisters[MmuState][address>>13] > VectorMask[CurrentRamConfig]))
 		MemPages[MmuRegisters[MmuState][address>>13]][address & 0x1FFF]=data;
 	return;
 }
@@ -342,10 +350,46 @@ unsigned short MemRead16(unsigned short addr)
 	return (MemRead8(addr)<<8 | MemRead8(addr+1));
 }
 
+unsigned short MSABI MemRead16_s(unsigned short addr)
+{
+	return (MemRead8_s(addr)<<8 | MemRead8_s(addr+1));
+}
+
 void MemWrite16(unsigned short data,unsigned short addr)
 {
 	MemWrite8( data >>8,addr);
 	MemWrite8( data & 0xFF,addr+1);
+	return;
+}
+
+void MSABI MemWrite16_s(unsigned short data,unsigned short addr)
+{
+	MemWrite8_s( data >>8,addr);
+	MemWrite8_s( data & 0xFF,addr+1);
+	return;
+}
+
+unsigned int MSABI MemRead32_s(unsigned short Address)
+{
+	return ( (MemRead16(Address)<<16) | MemRead16(Address+2) );
+}
+
+void MSABI MemWrite32_s(unsigned int data,unsigned short Address)
+{
+	MemWrite16( data>>16,Address);
+	MemWrite16( data & 0xFFFF,Address+2);
+	return;
+}
+
+unsigned int MemRead32(unsigned short Address)
+{
+	return ( (MemRead16(Address)<<16) | MemRead16(Address+2) );
+}
+
+void MemWrite32(unsigned int data,unsigned short Address)
+{
+	MemWrite16( data>>16,Address);
+	MemWrite16( data & 0xFFFF,Address+2);
 	return;
 }
 
