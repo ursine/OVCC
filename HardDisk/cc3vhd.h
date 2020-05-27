@@ -17,8 +17,8 @@ This file is part of VCC (Virtual Color Computer).
     You should have received a copy of the GNU General Public License
     along with VCC (Virtual Color Computer).  If not, see <http://www.gnu.org/licenses/>.
 */
-void UnmountHD(void);
-int MountHD(char [256]);
+void UnmountHD(int);
+int MountHD(char [256], int);
 unsigned char IdeRead(unsigned char);
 void IdeWrite (unsigned char, unsigned char);
 void DiskStatus(char *);
@@ -27,7 +27,7 @@ void DiskStatus(char *);
 #define STANDALONE 2
 
 
-#define DRIVESIZE 130	//in Mb
+#define DRIVESIZE 2048	//in Mb
 #define MAX_SECTOR DRIVESIZE*1024*1024
 #define SECTORSIZE 256
 

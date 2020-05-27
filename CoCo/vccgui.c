@@ -222,7 +222,8 @@ void CPUIncDecF3F4(AG_Event *event)
 {
     extern void ConfigOKApply(int);
     extern void CPUConfigSpeed(int);
-
+    extern void JoyStickConfigRecordState();
+    
     int incdec = AG_INT(1);
 
     cpuMax = (double)CurrentConfig.MaxOverclock * cpuMin;
@@ -236,6 +237,7 @@ void CPUIncDecF3F4(AG_Event *event)
     cpuOCval += cpuMin * (double)incdec;
 
     CPUConfigSpeed((int)(cpuOCval/cpuMin));
+    JoyStickConfigRecordState();
     ConfigOKApply(0);
 }
 
@@ -335,21 +337,25 @@ void CPUChange(AG_Event *event)
     //int newSelection = AG_INT(1);
     extern void CPUConfigCPU(int);
 
-#ifndef __amd64__
-    if (CPU > 1)
-    {
-        AG_TextMsg(AG_MSG_INFO, "Feature only available on Intel");
-        CPU = 1;
-    }
-#endif
     CPUConfigCPU(CPU);
 }
 
 void MMUChange(AG_Event *event)
 {
-    int newSelection = AG_INT(1);
+    //int newSelection = AG_INT(1);
 
-    AG_TextMsg(AG_MSG_INFO, "(Coming Soon) Feature only available on Linux");
+#ifdef __MINGW32__
+    if (MMU > 0)
+    {
+        AG_TextMsg(AG_MSG_INFO, "Feature only available on Linux");
+        MMU = 0;
+        return;
+    }
+#endif
+    
+    extern void MMUConfigMMU(int);
+
+    MMUConfigMMU(MMU);
 }
 
 void MonitorChange(AG_Event *event)
@@ -852,7 +858,7 @@ void PrintMonitorChange(AG_Event *event)
 
 void SetStatusBarText(const char *text, SystemState2 *STState)
 {
-    if (sdl->r == NULL) return;
+    if (sdl == NULL || sdl->r == NULL) return;
     
     if (STState->EmulationRunning) AG_LabelText(status, "%s", text);
 }
@@ -1037,7 +1043,6 @@ void Configure(AG_Event *ev)
         {
             "Motorola MC6809",
             "Hitachi HD6309",
-            "Hitachi HD6309 Turbo",
             NULL
         };
 
@@ -1583,7 +1588,7 @@ void About(AG_Event *ev)
     AG_WindowSetCloseAction(AboutWin, AG_WINDOW_DETACH);
 
 	AG_Label *lbl = AG_LabelNewPolled(AboutWin, AG_LABEL_FRAME | AG_LABEL_EXPAND, "%s", 
-        "OVCC 1.1.0\n"
+        "OVCC 1.2.0\n"
         "SDL2 / AGAR 1.5.0 modifications by:"
         "Walter Zambotti\n"
         "Forked from VCC 2.01B (1.43)\n"

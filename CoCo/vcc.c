@@ -61,9 +61,24 @@ void CartLoad(void);
 void (*CPUInit)(void)=NULL;
 int  (*CPUExec)( int)=NULL;
 void (*CPUReset)(void)=NULL;
-void (*CPUAssertInterupt)(unsigned char,unsigned char)=NULL;
-void (*CPUDeAssertInterupt)(unsigned char)=NULL;
-void (*CPUForcePC)(unsigned short)=NULL;
+void (*CPUAssertInterupt)(UINT8, UINT8)=NULL;
+void (*CPUDeAssertInterupt)(UINT8)=NULL;
+void (*CPUForcePC)(UINT16)=NULL;
+PUINT8 (*MmuInit)(UINT8)=NULL;
+void (*MmuReset)(void)=NULL;
+void (*SetVectors)(UINT8)=NULL;
+void (*SetMmuRegister)(UINT8, UINT8)=NULL;
+void (*SetRomMap)(UINT8)=NULL;
+void (*SetMapType)(UINT8)=NULL;
+void (*Set_MmuTask)(UINT8)=NULL;
+void (*Set_MmuEnabled)(UINT8)=NULL;
+PUINT8 (*Getint_rom_pointer)(void)=NULL;
+void (*CopyRom)(void)=NULL;
+UINT8 (*MmuRead8)(UINT8, UINT16)=NULL;
+void (*MmuWrite8)(UINT8, UINT8, UINT16)=NULL;
+UINT8 (*MemRead8)(UINT16)=NULL;
+void (*MemWrite8)(UINT8, UINT16)=NULL;
+void (*SetDistoRamBank)(UINT8)=NULL;
 void FullScreenToggle(void);
 
 // Message handlers
@@ -312,7 +327,21 @@ unsigned char SetCPUMultiplyer(unsigned short Multiplyer)
 
 void DoHardReset(SystemState2* const HRState)
 {	
+	//fprintf(stderr, "DoHardReset %d\n", HRState->MmuType);
+	
+	switch (HRState->MmuType)
+	{	case 0: // Software MMU
+			SetSWMmu();
+			break;
+#ifndef __MINGW32__
+		case 1: // Hardware MMU
+			SetHWMmu();
+			break;
+#endif
+	}
+
 	HRState->RamBuffer=MmuInit(HRState->RamSize);	//Alocate RAM/ROM & copy ROM Images from source
+	//TriggerModuleShare(2); // 2 = reshare PAK Ext ROM
 	HRState->WRamBuffer=(unsigned short *)HRState->RamBuffer;
 	EmuState2.RamBuffer=HRState->RamBuffer;
 	EmuState2.WRamBuffer=HRState->WRamBuffer;
@@ -323,24 +352,6 @@ void DoHardReset(SystemState2* const HRState)
 	}
 	switch (HRState->CpuType)
 	{
-	#ifdef __amd64__
-		case 2: // 6309 Turbo
-		CPUInit=HD6309Init_s;
-		CPUExec=HD6309Exec_s;
-		CPUReset=HD6309Reset_s;
-		CPUAssertInterupt=HD6309AssertInterupt_s;
-		CPUDeAssertInterupt=HD6309DeAssertInterupt_s;
-		CPUForcePC=HD6309ForcePC_s;
-		break;
-	#endif
-		case 1: // 6309
-		CPUInit=HD6309Init;
-		CPUExec=HD6309Exec;
-		CPUReset=HD6309Reset;
-		CPUAssertInterupt=HD6309AssertInterupt;
-		CPUDeAssertInterupt=HD6309DeAssertInterupt;
-		CPUForcePC=HD6309ForcePC;
-		break;
 		case 0: // 6809
 		CPUInit=MC6809Init;
 		CPUExec=MC6809Exec;
@@ -349,7 +360,16 @@ void DoHardReset(SystemState2* const HRState)
 		CPUDeAssertInterupt=MC6809DeAssertInterupt;
 		CPUForcePC=MC6809ForcePC;
 		break;
+		case 1: // 6309
+		CPUInit=HD6309Init;
+		CPUExec=HD6309Exec;
+		CPUReset=HD6309Reset;
+		CPUAssertInterupt=HD6309AssertInterupt;
+		CPUDeAssertInterupt=HD6309DeAssertInterupt;
+		CPUForcePC=HD6309ForcePC;
+		break;
 	}
+
 	PiaReset();
 	mc6883_reset();	//Captures interal rom pointer for CPU Interupt Vectors
 	CPUInit();
@@ -416,11 +436,6 @@ unsigned char SetCpuType( unsigned char Tmp)
 		EmuState2.CpuType=1;
 		strcpy(CpuName,"HD6309");
 		break;
-
-	case 2:
-		EmuState2.CpuType=2;
-		strcpy(CpuName,"HD6309X");
-		break;
 	}
 	return(EmuState2.CpuType);
 }
@@ -469,6 +484,18 @@ void SetNatEmuStat(unsigned char natemu)
 	}
 }
 
+static char MMUStat[2] = "";
+
+void SetMMUStat(unsigned char mmu)
+{
+	switch (mmu)
+	{
+		case 0: strcpy(MMUStat, "S"); break;
+		case 1:	strcpy(MMUStat, "H"); break;
+		default: strcpy(MMUStat, ""); break;
+	}
+}
+
 void EmuLoop(void)
 {
 	static float FPS;
@@ -477,6 +504,7 @@ void EmuLoop(void)
 	AG_Delay(30);
 	unsigned long LC = 0;
 	int framecnt = 0;
+	static char ttbuff[256];
 
 	//TestDelay();
 
@@ -547,10 +575,9 @@ void EmuLoop(void)
 		FPS= FPS != 0 ? FPS/EmuState2.FrameSkip : GetCurrentFPS()/EmuState2.FrameSkip;
 		GetModuleStatus(&EmuState2);
 
-		char ttbuff[256];
 		// if (++framecnt == 6)
 		// {
-			sprintf(ttbuff,"Skip:%2.2i|FPS:%3.0f|%s%s@%3.2fMhz|%s",EmuState2.FrameSkip,FPS,CpuName,NatEmuStat,EmuState2.CPUCurrentSpeed,EmuState2.StatusLine);
+			sprintf(ttbuff,"Skip:%2.2i|FPS:%3.0f|%s%s%s@%3.2fMhz|%s",EmuState2.FrameSkip,FPS,CpuName,NatEmuStat,MMUStat,EmuState2.CPUCurrentSpeed,EmuState2.StatusLine);
 			SetStatusBarText(ttbuff,&EmuState2);
 			//fprintf(stderr, "|");
 		// 	framecnt = 0;

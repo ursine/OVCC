@@ -41,22 +41,23 @@ static char IniFile[MAX_PATH] = { 0 };
 typedef void (*ASSERTINTERUPT) (unsigned char,unsigned char);
 typedef void (*DMAMEMPOINTERS) ( MEMREAD8,MEMWRITE8);
 static void (*AssertInt)(unsigned char,unsigned char)=NULL;
-static unsigned char (*MemRead8)(unsigned short);
-static void (*MemWrite8)(unsigned char,unsigned short);
+static unsigned char (*MemRead8)(unsigned short)=NULL;
+static void (*MemWrite8)(unsigned char,unsigned short)=NULL;
 // static unsigned char *Memory=NULL;
 static unsigned char DiskRom[8192];
 static unsigned char ClockEnabled=1,ClockReadOnly=1;
 static void LoadHardDisk(AG_Event *);
 static void LoadConfig(void);
-static void SaveConfig(void);
+static void SaveConfig(char*);
 static void BuildMenu(void);
-static void UpdateMenu(void);
+static void UpdateMenu(int);
 static unsigned char LoadExtRom( char *);
+static char *PakRomAddr = NULL;
 
 AG_MenuItem *menuAnchor = NULL;
-AG_MenuItem *itemMenu = NULL;
-AG_MenuItem *itemEjectHDD = NULL;
-AG_MenuItem *itemLoadHDD = NULL;
+AG_MenuItem *itemMenu[2] = { NULL, NULL };
+AG_MenuItem *itemEjectHDD[2] = { NULL, NULL };
+AG_MenuItem *itemLoadHDD[2] = { NULL, NULL };
 AG_MenuItem *itemSeperator = NULL;
 
 INIman *iniman = NULL;
@@ -78,7 +79,6 @@ void __attribute__ ((destructor)) cleanUpLibrary(void) {
 void MemWrite(unsigned char Data, unsigned short Address)
 {
 	MemWrite8(Data,Address);
-	return;
 }
 
 unsigned char MemRead(unsigned short Address)
@@ -97,8 +97,6 @@ void ADDCALL ModuleName(char *ModName, AG_MenuItem *Temp)
 	{
 		BuildMenu();
 	}
-
-	return ;
 }
 
 void ADDCALL ModuleConfig(unsigned char func)
@@ -106,22 +104,39 @@ void ADDCALL ModuleConfig(unsigned char func)
 	switch (func)
 	{
 	case 0: // Destroy Menus
-		AG_MenuDel(itemEjectHDD);
-		AG_MenuDel(itemLoadHDD);
-		AG_MenuDel(itemMenu);
+		AG_MenuDel(itemEjectHDD[0]);
+		AG_MenuDel(itemLoadHDD[0]);
+		AG_MenuDel(itemMenu[0]);
+		AG_MenuDel(itemEjectHDD[1]);
+		AG_MenuDel(itemLoadHDD[1]);
+		AG_MenuDel(itemMenu[1]);
 		AG_MenuDel(itemSeperator);
+		UnmountHD(0);
+		UnmountHD(1);
 		break;
 
 	case 1: // Update ini file
 		strcpy(IniFile, iniman->files[iniman->lastfile].name);
+		break;
 
 	break;
 
 	default:
 		break;
 	}
+}
 
-	return;
+unsigned char ADDCALL ModuleReset(void)
+{
+	if (PakRomAddr != NULL) 
+	{
+		memcpy(PakRomAddr, DiskRom, EXTROMSIZE);
+	}
+}
+
+void ADDCALL PakRomShare(char *pakromaddr)
+{
+	PakRomAddr = pakromaddr;
 }
 
 /*
@@ -136,7 +151,6 @@ void AssertInterupt(ASSERTINTERUPT Dummy)
 void ADDCALL PackPortWrite(unsigned char Port, unsigned char Data)
 {
 	IdeWrite(Data,Port);
-	return;
 }
 
 unsigned char ADDCALL PackPortRead(unsigned char Port)
@@ -163,7 +177,6 @@ void ADDCALL MemPointers(MEMREAD8 Temp1, MEMWRITE8 Temp2)
 {
 	MemRead8=Temp1;
 	MemWrite8=Temp2;
-	return;
 }
 
 unsigned char ADDCALL PakMemRead8(unsigned short Address)
@@ -181,7 +194,6 @@ void PakMemWrite8(unsigned char Data,unsigned short Address)
 void ADDCALL ModuleStatus(char *MyStatus)
 {
 	DiskStatus(MyStatus);
-	return ;
 }
 
 //void ADDCALL SetIniPath (char *IniFilePath)
@@ -192,7 +204,6 @@ void ADDCALL SetIniPath(INIman *InimanP)
 	InitPrivateProfile(InimanP);
 	iniman = InimanP;
 	LoadConfig();
-	return;
 }
 
 /*
@@ -205,106 +216,125 @@ void CPUAssertInterupt(unsigned char Interupt,unsigned char Latencey)
 
 static int LoadHDD(AG_Event *event)
 {
-	char *hddfile = AG_STRING(1);
+	int disk = AG_INT(1);
+	char *hddfile = AG_STRING(2), entry[16];
 	//AG_FileType *ft = AG_PTR(2);
 
     if (AG_FileExists(hddfile))
     {
-		if (MountHD(hddfile) == 0)
+		if (MountHD(hddfile, disk) == 0)
 		{
 			AG_TextMsg(AG_MSG_ERROR, "Can't mount hard disk file %s", hddfile);
 		}
     }
 
 	AG_Strlcpy(HDDfilename, hddfile, sizeof(HDDfilename));
-	SaveConfig();
-	UpdateMenu();
+	sprintf(entry, "VHDImage%d", disk);
+	SaveConfig(entry);
+	UpdateMenu(disk);
 
-    return 0;
+  return 0;
 }
 
 static void LoadHardDisk(AG_Event *event)
 {
-    AG_Window *fdw = AG_WindowNew(AG_WINDOW_DIALOG);
-    AG_WindowSetCaption(fdw, "Select HDD file");
-    AG_WindowSetGeometryAligned(fdw, AG_WINDOW_ALIGNMENT_NONE, 500, 500);
-    AG_WindowSetCloseAction(fdw, AG_WINDOW_DETACH);
+	int disk = AG_INT(1);
 
-    AG_FileDlg *fd = AG_FileDlgNew(fdw, AG_FILEDLG_EXPAND | AG_FILEDLG_CLOSEWIN | AG_FILEDLG_MASK_EXT);
-    AG_FileDlgSetDirectory(fd, ".");
+	AG_Window *fdw = AG_WindowNew(AG_WINDOW_DIALOG);
+	AG_WindowSetCaption(fdw, "Select HDD file");
+	AG_WindowSetGeometryAligned(fdw, AG_WINDOW_ALIGNMENT_NONE, 500, 500);
+	AG_WindowSetCloseAction(fdw, AG_WINDOW_DETACH);
 
-	AG_FileDlgAddType(fd, "CoCo Hard Disk File", "*.vhd",	LoadHDD, NULL);
-    AG_WindowShow(fdw);
+	AG_FileDlg *fd = AG_FileDlgNew(fdw, AG_FILEDLG_EXPAND | AG_FILEDLG_CLOSEWIN | AG_FILEDLG_MASK_EXT);
+	AG_FileDlgSetDirectory(fd, ".");
+
+	AG_FileDlgAddType(fd, "CoCo Hard Disk File", "*.vhd",	LoadHDD, "%i", disk);
+  AG_WindowShow(fdw);
 }
 
 static void LoadConfig(void)
 {
 	char DiskRomPath[MAX_PATH]; 
+	char entry[16];
 	AG_DataSource *hr = NULL;
+	int disk = 0;
 
-	GetPrivateProfileString(moduleName, "VHDImage", "", HDDfilename, MAX_PATH, IniFile);
-	//fprintf(stderr, "Hard Disk : loadConfig : VHDImage %s %s\n", IniFile, HDDfilename);
-
-	hr = AG_OpenFile(HDDfilename, "r+");
-
-	if (hr == NULL)
+	for(disk = 0 ; disk < 2 ; disk++)
 	{
-		strcpy(HDDfilename,"");
-		WritePrivateProfileString(moduleName, "VHDImage", HDDfilename, IniFile);
-	}
-	else
-	{
-		AG_CloseFile(hr);
-		//fprintf(stderr, "Hard Disk : loadConfig : Mounting %s %s\n", IniFile, HDDfilename);
-		MountHD(HDDfilename);
-	}
+		sprintf(entry, "VHDImage%d", disk);
+		GetPrivateProfileString(moduleName, entry, "", HDDfilename, MAX_PATH, IniFile);
+		//fprintf(stderr, "Hard Disk : loadConfig : VHDImage %s %s\n", IniFile, HDDfilename);
 
-	UpdateMenu();
+		hr = AG_OpenFile(HDDfilename, "r+");
+
+		if (hr == NULL)
+		{
+			strcpy(HDDfilename,"");
+			WritePrivateProfileString(moduleName, entry, HDDfilename, IniFile);
+		}
+		else
+		{
+			AG_CloseFile(hr);
+			//fprintf(stderr, "Hard Disk : loadConfig : Mounting %s %s\n", IniFile, HDDfilename);
+			MountHD(HDDfilename, disk);
+		}
+
+		UpdateMenu(disk);
+	}
 
 	getcwd(DiskRomPath, sizeof(DiskRomPath));
 	strcat(DiskRomPath, "/rgbdos.rom");
 	LoadExtRom(DiskRomPath);
-	return;
 }
 
-static void SaveConfig(void)
+static void SaveConfig(char *entry)
 {
 	ValidatePath(HDDfilename);
-	WritePrivateProfileString(moduleName, "VHDImage", HDDfilename, IniFile);
-	return;
+	WritePrivateProfileString(moduleName, entry, HDDfilename, IniFile);
 }
 
 void UnloadHardDisk(AG_Event *event)
 {
-	UnmountHD();
+	char entry[16];
+	int disk = AG_INT(1);
+	UnmountHD(disk);
 	AG_Strlcpy(HDDfilename, "", sizeof(HDDfilename));
-	SaveConfig();
-	UpdateMenu();
+	sprintf(entry, "VHDImage%d", disk);
+	SaveConfig(entry);
+	UpdateMenu(disk);
 }
 
 static void BuildMenu(void)
 {
-	if (itemMenu == NULL)
+	int drv;
+	char disklabel[16];
+
+	if (itemSeperator != NULL) return;
+
+	itemSeperator = AG_MenuSeparator(menuAnchor);
+
+	for (drv = 0 ; drv < 2 ; drv++)
 	{
-		itemSeperator = AG_MenuSeparator(menuAnchor);
-	    itemMenu = AG_MenuNode(menuAnchor, "Hard Disk", NULL);
-        {
-            itemLoadHDD = AG_MenuAction(itemMenu, "Insert Disk", NULL, LoadHardDisk, NULL);
-            itemEjectHDD = AG_MenuAction(itemMenu, 
-                "Eject :                            ", 
-                NULL, UnloadHardDisk, NULL);
+		sprintf(disklabel, "Hard Disk %d", drv);
+
+		itemMenu[drv] = AG_MenuNode(menuAnchor, disklabel, NULL);
+		{
+				itemLoadHDD[drv] = AG_MenuAction(itemMenu[drv], "Insert Disk", NULL, LoadHardDisk, "%i", drv);
+				itemEjectHDD[drv] = AG_MenuAction(itemMenu[drv], 
+						"Eject :                            ", 
+						NULL, UnloadHardDisk, "%i", drv);
 		}
 	}
 }
 
-static void UpdateMenu(void)
+static void UpdateMenu(int Drive)
 {
 	char hddname[MAX_PATH];
 
 	AG_Strlcpy(hddname, HDDfilename, sizeof(hddname));
 	PathStripPath(hddname);
 
-	AG_MenuSetLabel(itemEjectHDD, "Eject : %s", hddname);
+	AG_MenuSetLabel(itemEjectHDD[Drive], "Eject : %s", hddname);
 }
 
 static unsigned char LoadExtRom( char *FilePath)	//Returns 1 on if loaded

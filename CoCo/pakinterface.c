@@ -46,6 +46,7 @@ extern AG_MenuItem *GetMenuAnchor();
 
 // Storage for Pak ROMs
 static uint8_t *ExternalRomBuffer = nullptr; 
+static unsigned short ExternROMsize = 0;
 static bool RomPackLoaded = false;
 
 extern SystemState2 EmuState2;
@@ -68,8 +69,8 @@ typedef void (*SETCART)(unsigned char);
 typedef void (*MEMWRITE8)(unsigned char,unsigned short);
 typedef void (*MMUWRITE8)(unsigned char,unsigned char,unsigned short);
 typedef void (*MODULESTATUS)(char *);
-typedef void (*DMAMEMPOINTERS) ( MEMREAD8,MEMWRITE8);
-typedef void (*MMUMEMPOINTERS) (MMUREAD8, MMUWRITE8);
+typedef void (*DMAMEMPOINTERS)(MEMREAD8, MEMWRITE8);
+typedef void (*MMUROMSHARE)(unsigned short, unsigned char *);
 typedef void (*SETCARTPOINTER)(SETCART);
 typedef void (*SETINTERUPTCALLPOINTER) (ASSERTINTERUPT);
 typedef unsigned short (*MODULEAUDIOSAMPLE)(void);
@@ -79,19 +80,20 @@ typedef void (*SETINI)(INIfile *);
 
 static void (*GetModuleName)(char *, AG_MenuItem *)=NULL;
 static void (*ConfigModule)(unsigned char)=NULL;
-static void (*SetInteruptCallPointer) ( ASSERTINTERUPT)=NULL;
-static void (*DmaMemPointer) (MEMREAD8,MEMWRITE8)=NULL;
-static void (*MmuMemPointer) (MMUREAD8,MMUWRITE8)=NULL;
+static void (*SetInteruptCallPointer)(ASSERTINTERUPT)=NULL;
+static void (*DmaMemPointer)(MEMREAD8, MEMWRITE8)=NULL;
+static void (*MmuMemPointer)(MMUREAD8, MMUWRITE8)=NULL;
+static void (*PakRomShare)(unsigned char *)=NULL;
 static void (*HeartBeat)(void)=NULL;
-static void (*PakPortWrite)(unsigned char,unsigned char)=NULL;
+static void (*PakPortWrite)(unsigned char, unsigned char)=NULL;
 static unsigned char (*PakPortRead)(unsigned char)=NULL;
-static void (*PakMemWrite8)(unsigned char,unsigned short)=NULL;
+static void (*PakMemWrite8)(unsigned char, unsigned short)=NULL;
 static unsigned char (*PakMemRead8)(unsigned short)=NULL;
 static void (*ModuleStatus)(char *)=NULL;
 static unsigned short (*ModuleAudioSample)(void)=NULL;
-static void (*ModuleReset) (void)=NULL;
-static void (*SetIniPath) (char *)=NULL;
-static void (*SetIni) (INIfile *)=NULL;
+static void (*ModuleReset)(void)=NULL;
+static void (*SetIniPath)(char *)=NULL;
+static void (*SetIni)(INIfile *)=NULL;
 static void (*PakSetCart)(SETCART)=NULL;
 
 void UpdateCartridgeMenu(char *modname);
@@ -122,8 +124,30 @@ void PakTimer(void)
 void ResetBus(void)
 {
 	BankedCartOffset=0;
-	if (ModuleReset !=NULL)
+	if (DmaMemPointer != NULL)
+	{
+		DmaMemPointer(*MemRead8, *MemWrite8);
+	}
+	if (MmuMemPointer != NULL)
+	{
+		MmuMemPointer(*MmuRead8, *MmuWrite8);
+	}
+	if (SetInteruptCallPointer != NULL)
+	{
+		SetInteruptCallPointer(CPUAssertInterupt);
+	}
+	if (PakRomShare != NULL)
+	{
+		PakRomShare(GetPakExtMem());
+	}
+	if (ModuleReset != NULL)
+	{
 		ModuleReset();
+	}
+	if (ExternalRomBuffer != NULL && ExternROMsize != 0)
+	{
+		memcpy(GetPakExtMem(), ExternalRomBuffer, ExternROMsize);
+	}
 	return;
 }
 
@@ -154,6 +178,7 @@ void PackPortWrite(unsigned char Port,unsigned char Data)
 	
 	if ((Port == 0x40) && (RomPackLoaded == true)) {
 		BankedCartOffset = (Data & 15) << 14;
+		fprintf(stderr, "banked cart offset %x\n", BankedCartOffset);
 	}
 
 	return;
@@ -162,7 +187,7 @@ void PackPortWrite(unsigned char Port,unsigned char Data)
 unsigned char PackMem8Read (unsigned short Address)
 {
 	if (PakMemRead8!=NULL)
-		return(PakMemRead8(Address&32767));
+		return(PakMemRead8(Address/*&32767*/));
 	if (ExternalRomBuffer!=NULL)
 		return(ExternalRomBuffer[(Address & 32767)+BankedCartOffset]);
 	return(0);
@@ -190,6 +215,7 @@ int InsertModule (char *ModulePath)
 	INIman *tempMan = NULL;
 	unsigned char FileType=0;
 	FileType=FileID(ModulePath);
+	ExternROMsize = 0;
 
 	switch (FileType)
 	{
@@ -204,9 +230,10 @@ int InsertModule (char *ModulePath)
 		PathStripPath(Modname);
 		PathRemoveExtension(Modname);
 		UpdateCartridgeMenu(Modname); //Refresh Menus
-		UpdateOnBoot(Modname);
+		UpdateOnBoot(ModulePath);
 		EmuState2.ResetPending=2;
 		SetCart(1);
+		strcpy(DllPath,ModulePath);
 		return(0);
 	break;
 
@@ -238,6 +265,7 @@ int InsertModule (char *ModulePath)
 		HeartBeat = SDL_LoadFunction(hinstLib, "HeartBeat");
 		PakMemWrite8 = SDL_LoadFunction(hinstLib, "PakMemWrite8");
 		PakMemRead8 = SDL_LoadFunction(hinstLib, "PakMemRead8");
+		PakRomShare = SDL_LoadFunction(hinstLib, "PakRomShare");
 		ModuleStatus = SDL_LoadFunction(hinstLib, "ModuleStatus");
 		ModuleAudioSample = SDL_LoadFunction(hinstLib, "ModuleAudioSample");
 		ModuleReset = SDL_LoadFunction(hinstLib, "ModuleReset");
@@ -251,18 +279,6 @@ int InsertModule (char *ModulePath)
 			return(NOTVCC);
 		}
 		BankedCartOffset=0;
-		if (DmaMemPointer != NULL)
-		{
-			DmaMemPointer(MemRead8, MemWrite8);
-		}
-		if (MmuMemPointer != NULL)
-		{
-			MmuMemPointer(MmuRead8, MmuWrite8);
-		}
-		if (SetInteruptCallPointer != NULL)
-		{
-			SetInteruptCallPointer(CPUAssertInterupt);
-		}
 
 		//fprintf(stderr, "Insert Module : Calling GetModuleName %lx\n", (unsigned long)GetModuleName);
 		UpdateOnBoot(Modname);
@@ -396,12 +412,13 @@ int load_ext_rom(char filename[MAX_PATH])
 	while ((feof(rom_handle) == 0) && (index < PAK_MAX_MEM)) {
 		ExternalRomBuffer[index++] = fgetc(rom_handle);
 	}
+	ExternROMsize = --index;
 	fclose(rom_handle);
 	
 	UnloadDll(1);
 	BankedCartOffset=0;
 	RomPackLoaded=true;
-	
+
 	return index;
 }
 
@@ -417,7 +434,6 @@ void UnloadDll(short int config)
 	{
 		ConfigModule(0); // 0 = Release Resources (Menus etc)
 	}
-	ConfigModule=NULL;
 	GetModuleName=NULL;
 	ConfigModule=NULL;
 	PakPortWrite=NULL;
@@ -428,9 +444,12 @@ void UnloadDll(short int config)
 	HeartBeat=NULL;
 	PakMemWrite8=NULL;
 	PakMemRead8=NULL;
+	PakRomShare=NULL;
 	ModuleStatus=NULL;
 	ModuleAudioSample=NULL;
 	ModuleReset=NULL;
+	SetIni=NULL;
+	PakSetCart=NULL;
 	if (hinstLib !=NULL)
 		SDL_UnloadObject(hinstLib); 
 	hinstLib=NULL;

@@ -19,42 +19,42 @@ This file is part of VCC (Virtual Color Computer).
     along with VCC (Virtual Color Computer).  If not, see <http://www.gnu.org/licenses/>.
 */
 
+typedef unsigned char  UINT8,  *PUINT8;
+typedef unsigned short UINT16, *PUINT16;
+typedef unsigned int   UINT32, *PUINT32;
+typedef unsigned long  UINT64, *PUINT64;
 
-#ifdef __cplusplus
-extern "C" void MemWrite8(unsigned char,unsigned short );
-extern "C" unsigned char MemRead8(short unsigned int);
-extern "C" void MmuWrite8(unsigned char,unsigned char,unsigned short );
-extern "C" unsigned char MmuRead8(unsigned char,short unsigned int);
-#else
-extern void MemWrite8(unsigned char,unsigned short );
-extern unsigned char MemRead8(short unsigned int);
-extern void MmuWrite8(unsigned char,unsigned char,unsigned short );
-extern unsigned char MmuRead8(unsigned char,short unsigned int);
-#endif
-void MemWrite16(unsigned short,unsigned short );
-unsigned short MemRead16(short unsigned int);
-unsigned int MemRead32(unsigned short);
-void MemWrite32(unsigned int, unsigned short);
+extern UINT8 (*MemRead8)(UINT16);
+extern void (*MemWrite8)(UINT8, UINT16);
 
-unsigned char * MmuInit(unsigned char);
-unsigned char *	Getint_rom_pointer(void);
-unsigned char * Getext_rom_pointer(void);
+extern UINT8 (*MmuRead8)(UINT8, UINT16);
+extern void (*MmuWrite8)(UINT8, UINT8, UINT16);
 
-void fMemWrite8(unsigned char,unsigned short );
-unsigned char fMemRead8(short unsigned int);
+extern UINT16 MemRead16(UINT16);
+extern void MemWrite16(UINT16, UINT16);
+extern UINT32 MemRead32(UINT16);
+extern void MemWrite32(UINT32, UINT16);
 
-int load_int_rom(char * );
-void SetMapType(unsigned char);
-void CopyRom(void);
-void Set_MmuTask(unsigned char);
-void SetMmuRegister(unsigned char,unsigned char);
-void Set_MmuEnabled (unsigned char );
-void SetRomMap(unsigned char );
-void SetVectors(unsigned char);
-void MmuReset(void);
-void SetDistoRamBank(unsigned char);
-void SetMmuPrefix(unsigned char);
-void SetCartMMU (unsigned char);
+extern unsigned char *GetPakExtMem();
+PUINT8 (*MmuInit)(UINT8);
+extern PUINT8 (*Getint_rom_pointer)(void);
+extern void (*SetMapType)(UINT8);
+extern void (*CopyRom)(void);
+extern void (*Set_MmuTask)(UINT8);
+extern void (*SetMmuRegister)(UINT8, UINT8);
+extern void (*Set_MmuEnabled)(UINT8);
+extern void (*SetRomMap)(UINT8);
+extern void (*SetVectors)(UINT8);
+extern void (*MmuReset)(void);
+extern void (*SetDistoRamBank)(UINT8);
+extern void SetMMUStat(unsigned char);
+
+extern void SetHWMmu();
+extern void SetSWMmu();
+
+static void SetMmuPrefix(UINT8);
+static void freePhysicalMemPages();
+static int load_int_rom(char *);
 
 #define _128K	0	
 #define _512K	1

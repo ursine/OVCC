@@ -1,20 +1,16 @@
-
 ifeq ($(TARGETOS),Mingw)
-    EXEDIR = ..
-    LIBDIR = ../libs
+EXEDIR = ..
+LIBDIR = ../libs
 else
-    prefix = /usr/local
-    EXEDIR = $(DESTDIR)$(prefix)/bin
-    LIBDIR = $(DESTDIR)$(prefix)/lib/ovcc
+prefix = /usr/local
+EXEDIR = $(DESTDIR)$(prefix)/bin
+LIBDIR = $(DESTDIR)$(prefix)/lib/ovcc
 endif
-
-# assembler
-ASM=jwasm
 
 ODIR = obj
 
-DEBUG=-g
-OPT=-O2 # -Og
+DEBUG=#-g
+OPT=-O2 # -flto # -Og
 WARN = -w # -Wall
 PTHREAD = -pthread
 
@@ -24,7 +20,7 @@ IDIR = $(INCDIR) $(SDLINC) $(AGARINC)
 
 SDLLIB := $(shell sdl2-config --libs)
 AGARLIB := $(shell agar-config --libs)
-LIBS = $(SDLLIB) $(AGARLIB)
+LIBS = $(SDLLIB) $(AGARLIB) -lrt # Comment out rt lib for Mac
 
 CFLAGS += $(DEBUG) $(OPT) $(WARN) $(IDIR)
 
@@ -33,7 +29,7 @@ LDFLAGS += $(LIBS) #-Wl,-export-all-symbols # -export-dynamic
 OBJS = $(patsubst %,$(ODIR)/%,$(_OBJS))
 
 $(TARGET): $(OBJS)
-	$(CC) -o $@ $^ $(LDFLAGS)
+	$(CC) -o $@ $(OPT) $^ $(LDFLAGS)
 
 testlib: $(ODIR)/testlib.o
 	$(CC) -o $@ $< $(LIBS)

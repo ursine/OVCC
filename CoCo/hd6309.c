@@ -14,6 +14,8 @@ This file is part of VCC (Virtual Color Computer).
 
     You should have received a copy of the GNU General Public License
     along with VCC (Virtual Color Computer).  If not, see <http://www.gnu.org/licenses/>.
+
+		Additional 6309 modifications by Walter ZAMBOTTI 2019
 */
 
 #include <stdio.h>
@@ -63,6 +65,8 @@ This file is part of VCC (Virtual Color Computer).
 #define M2827	19
 #define M3726	20
 #define M3130	21
+#define M42 22
+#define M53 23
 
 typedef union
 {
@@ -104,12 +108,9 @@ static char RegName[16][10]={"D","X","Y","U","S","PC","W","V","A","B","CC","DP",
 
 static wideregister q;
 static cpuregister pc, x, y, u, s, dp, v, z;
-static unsigned char InsCycles[2][25];
 static unsigned char cc[8];
 static unsigned int md[8];
-static unsigned char *ureg8[8]; 
 static unsigned char ccbits,mdbits;
-static unsigned short *xfreg16[8];
 static int CycleCounter=0;
 static unsigned int SyncWaiting=0;
 unsigned short temp16;
@@ -127,6 +128,56 @@ static signed char *spostbyte=(signed char *)&postbyte;
 static signed short *spostword=(signed short *)&postword;
 static char InInterupt=0;
 static int gCycleFor;
+
+static unsigned char *ureg8[8] =
+{
+	&A_REG, &B_REG, &ccbits, &dp.B.msb, &z.B.msb, &z.B.lsb, &E_REG, &F_REG
+};
+
+static unsigned short *xfreg16[8] =
+{
+	&D_REG, &X_REG, &Y_REG, &U_REG, &S_REG, &PC_REG, &W_REG, &V_REG
+}; 
+
+static UINT8 InsCycles[2][25] =
+{
+	{ 6, 6, 3, 2, 5, 9, 8, 5, 3, 11, 7, 7, 4, 8, 8, 9, 27, 36, 30, 28, 37, 31, 4, 5 },
+	{ 5, 4, 2, 1, 4, 7, 5, 1, 1, 10, 6, 5, 3, 7, 6, 8, 26 ,25, 29, 27, 26, 30, 2, 3 }
+};
+
+static UINT8 NatEmuCycles65 = 6;
+static UINT8 NatEmuCycles64 = 6;
+static UINT8 NatEmuCycles32 = 3;
+static UINT8 NatEmuCycles21 = 2;
+static UINT8 NatEmuCycles54 = 5;
+static UINT8 NatEmuCycles97 = 9;
+static UINT8 NatEmuCycles85 = 8;
+static UINT8 NatEmuCycles51 = 5;
+static UINT8 NatEmuCycles31 = 3;
+static UINT8 NatEmuCycles1110 = 11;
+static UINT8 NatEmuCycles76 = 7;
+static UINT8 NatEmuCycles75 = 7;
+static UINT8 NatEmuCycles43 = 4;
+static UINT8 NatEmuCycles87 = 8;
+static UINT8 NatEmuCycles86 = 8;
+static UINT8 NatEmuCycles98 = 9;
+static UINT8 NatEmuCycles2726 = 27;
+static UINT8 NatEmuCycles3635 = 36;
+static UINT8 NatEmuCycles3029 = 30;
+static UINT8 NatEmuCycles2827 = 28;
+static UINT8 NatEmuCycles3726 = 37;
+static UINT8 NatEmuCycles3130 = 31;
+static UINT8 NatEmuCycles42 = 4;
+static UINT8 NatEmuCycles53 = 5;
+
+static UINT8 *NatEmuCycles[] =
+{
+	&NatEmuCycles65, &NatEmuCycles64, &NatEmuCycles32, &NatEmuCycles21, &NatEmuCycles54, &NatEmuCycles97,
+	&NatEmuCycles85, &NatEmuCycles51, &NatEmuCycles31, &NatEmuCycles1110, &NatEmuCycles76, &NatEmuCycles75,
+	&NatEmuCycles43, &NatEmuCycles87,	&NatEmuCycles86, &NatEmuCycles98,	&NatEmuCycles2726, &NatEmuCycles3635,
+	&NatEmuCycles3029, &NatEmuCycles2827,	&NatEmuCycles3726, &NatEmuCycles3130,	&NatEmuCycles42, &NatEmuCycles53
+};
+
 //END Global variables for CPU Emulation-------------------
 
 //Fuction Prototypes---------------------------------------
@@ -144,11 +195,10 @@ static void cpu_nmi(void);
 unsigned char GetSorceReg(unsigned char);
 void Page_2(void);
 void Page_3(void);
-void MemWrite8(unsigned char, unsigned short);
-void MemWrite16(unsigned short, unsigned short);
-unsigned char MemRead8(unsigned short);
-unsigned short MemRead16(unsigned short);
-extern void SetNatEmuStat(unsigned char);
+// void MemWrite8(unsigned char, unsigned short);
+// void MemWrite16(unsigned short, unsigned short);
+// unsigned char MemRead8(unsigned short);
+// unsigned short MemRead16(unsigned short);
 
 //unsigned char GetDestReg(unsigned char);
 //END Fuction Prototypes-----------------------------------
@@ -176,70 +226,6 @@ void HD6309Reset(void)
 
 void HD6309Init(void)
 {	//Call this first or RESET will core!
-	// reg pointers for TFR and EXG and LEA ops
-	xfreg16[0] = &D_REG;
-	xfreg16[1] = &X_REG;
-	xfreg16[2] = &Y_REG;
-	xfreg16[3] = &U_REG;
-	xfreg16[4] = &S_REG;
-	xfreg16[5] = &PC_REG;
-	xfreg16[6] = &W_REG;
-	xfreg16[7] = &V_REG;
-
-	ureg8[0]=(unsigned char*)&A_REG;		
-	ureg8[1]=(unsigned char*)&B_REG;		
-	ureg8[2]=(unsigned char*)&ccbits;
-	ureg8[3]=(unsigned char*)&dp.B.msb;
-	ureg8[4]=(unsigned char*)&O_REG;
-	ureg8[5]=(unsigned char*)&O_REG;
-	ureg8[6]=(unsigned char*)&E_REG;
-	ureg8[7]=(unsigned char*)&F_REG;
-
-	//This handles the disparity between 6309 and 6809 Instruction timing
-	InsCycles[0][M65]=6;	//6-5
-	InsCycles[1][M65]=5;
-	InsCycles[0][M64]=6;	//6-4
-	InsCycles[1][M64]=4;
-	InsCycles[0][M32]=3;	//3-2
-	InsCycles[1][M32]=2;
-	InsCycles[0][M21]=2;	//2-1
-	InsCycles[1][M21]=1;
-	InsCycles[0][M54]=5;	//5-4
-	InsCycles[1][M54]=4;
-	InsCycles[0][M97]=9;	//9-7
-	InsCycles[1][M97]=7;
-	InsCycles[0][M85]=8;	//8-5
-	InsCycles[1][M85]=5;
-	InsCycles[0][M51]=5;	//5-1
-	InsCycles[1][M51]=1;
-	InsCycles[0][M31]=3;	//3-1
-	InsCycles[1][M31]=1;
-	InsCycles[0][M1110]=11;	//11-10
-	InsCycles[1][M1110]=10;
-	InsCycles[0][M76]=7;	//7-6
-	InsCycles[1][M76]=6;
-	InsCycles[0][M75]=7;	//7-5
-	InsCycles[1][M75]=5;
-	InsCycles[0][M43]=4;	//4-3
-	InsCycles[1][M43]=3;
-	InsCycles[0][M87]=8;	//8-7
-	InsCycles[1][M87]=7;
-	InsCycles[0][M86]=8;	//8-6
-	InsCycles[1][M86]=6;
-	InsCycles[0][M98]=9;	//9-8
-	InsCycles[1][M98]=8;
-	InsCycles[0][M2726]=27;	//27-26
-	InsCycles[1][M2726]=26;
-	InsCycles[0][M3635]=36;	//36-25
-	InsCycles[1][M3635]=35;	
-	InsCycles[0][M3029]=30;	//30-29
-	InsCycles[1][M3029]=29;	
-	InsCycles[0][M2827]=28;	//28-27
-	InsCycles[1][M2827]=27;	
-	InsCycles[0][M3726]=37;	//37-26
-	InsCycles[1][M3726]=26;		
-	InsCycles[0][M3130]=31;	//31-30
-	InsCycles[1][M3130]=30;		
 	SetNatEmuStat(1);
 	cc[I]=1;
 	cc[F]=1;
@@ -257,7 +243,7 @@ void Neg_D(void)
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
 	MemWrite8(temp8, temp16);
-	CycleCounter += InsCycles[md[NATIVE6309]][M65];
+	CycleCounter += NatEmuCycles65;
 }
 
 void Oim_D(void)
@@ -294,7 +280,7 @@ void Com_D(void)
 	cc[C] = 1;
 	cc[V] = 0;
 	MemWrite8(temp8,temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Lsr_D(void)
@@ -306,7 +292,7 @@ void Lsr_D(void)
 	cc[Z] = ZTEST(temp8);
 	cc[N] = 0;
 	MemWrite8(temp8,temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Eim_D(void)
@@ -331,7 +317,7 @@ void Ror_D(void)
 	cc[Z] = ZTEST(temp8);
 	cc[N] = NTEST8(temp8);
 	MemWrite8(temp8,temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Asr_D(void)
@@ -343,7 +329,7 @@ void Asr_D(void)
 	cc[Z] = ZTEST(temp8);
 	cc[N] = NTEST8(temp8);
 	MemWrite8(temp8,temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Asl_D(void)
@@ -356,7 +342,7 @@ void Asl_D(void)
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
 	MemWrite8(temp8,temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Rol_D(void)
@@ -370,7 +356,7 @@ void Rol_D(void)
 	cc[Z] = ZTEST(temp8);
 	cc[N] = NTEST8(temp8);
 	MemWrite8(temp8,temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Dec_D(void)
@@ -381,7 +367,7 @@ void Dec_D(void)
 	cc[N] = NTEST8(temp8);
 	cc[V] = temp8==0x7F;
 	MemWrite8(temp8,temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Tim_D(void)
@@ -403,7 +389,7 @@ void Inc_D(void)
 	cc[V] = temp8==0x80;
 	cc[N] = NTEST8(temp8);
 	MemWrite8(temp8,temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Tst_D(void)
@@ -412,13 +398,13 @@ void Tst_D(void)
 	cc[Z] = ZTEST(temp8);
 	cc[N] = NTEST8(temp8);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M64];
+	CycleCounter+=NatEmuCycles64;
 }
 
 void Jmp_D(void)
 {	//E
 	PC_REG= ((dp.Reg |MemRead8(PC_REG)));
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Clr_D(void)
@@ -428,7 +414,7 @@ void Clr_D(void)
 	cc[N] = 0;
 	cc[V] = 0;
 	cc[C] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void LBeq_R(void)
@@ -634,9 +620,12 @@ void Addr(void)
 		}
 
 		temp16 = source8 + dest8;
-		if (Dest == 2) 
-			setcc((unsigned char)temp16);
-		*ureg8[Dest] = (unsigned char)temp16;
+		switch (Dest)
+		{
+			case 2: 				setcc((unsigned char)temp16); break;
+			case 4: case 5: break; // never assign to zero reg
+			default: 				*ureg8[Dest] = (unsigned char)temp16; break;
+		}
 		cc[C] = (temp16 & 0x100) >> 8;
 		cc[V] = OVERFLOW8(cc[C], source8, dest8, temp16);
 		cc[N] = NTEST8(*ureg8[Dest]);
@@ -669,7 +658,6 @@ void Addr(void)
 		cc[V] = OVERFLOW16(cc[C], source16, dest16, temp32);
 		cc[N] = NTEST16(*xfreg16[Dest]);
 		cc[Z] = ZTEST(*xfreg16[Dest]);
-		O_REG = 0; // In case the Dest is the zero reg which can never be changed
 	}
 	CycleCounter += 4;
 }
@@ -701,8 +689,12 @@ void Adcr(void)
 		}
 
 		temp16 = source8 + dest8 + cc[C];
-		if (Dest == 2) setcc((unsigned char)temp16);
-		*ureg8[Dest] = (unsigned char)temp16;
+		switch (Dest)
+		{
+			case 2: 				setcc((unsigned char)temp16); break;
+			case 4: case 5: break; // never assign to zero reg
+			default: 				*ureg8[Dest] = (unsigned char)temp16; break;
+		}
 		cc[C] = (temp16 & 0x100) >> 8;
 		cc[V] = OVERFLOW8(cc[C], source8, dest8, temp16);
 		cc[N] = NTEST8(*ureg8[Dest]);
@@ -733,9 +725,7 @@ void Adcr(void)
 		*xfreg16[Dest] = (unsigned short)temp32;
 		cc[C] = (temp32 & 0x10000) >> 16;
 		cc[V] = OVERFLOW16(cc[C], source16, dest16, temp32);
-		cc[N] = NTEST16(*xfreg16[Dest]);
-		cc[Z] = ZTEST(*xfreg16[Dest]);
-		O_REG = 0; // In case the Dest is the zero reg which can never be changed
+		cc[N] = NTEST16(*xfreg16[Dest]);		cc[Z] = ZTEST(*xfreg16[Dest]);
 	}
 	CycleCounter += 4;
 }
@@ -767,8 +757,12 @@ void Subr(void)
 		}
 
 		temp16 = dest8 - source8;
-		if (Dest == 2) setcc((unsigned char)temp16);
-		*ureg8[Dest] = (unsigned char)temp16;
+		switch (Dest)
+		{
+			case 2: 				setcc((unsigned char)temp16); break;
+			case 4: case 5: break; // never assign to zero reg
+			default: 				*ureg8[Dest] = (unsigned char)temp16; break;
+		}
 		cc[C] = (temp16 & 0x100) >> 8;
 		cc[V] = cc[C] ^ ((dest8 ^ *ureg8[Dest] ^ source8) >> 7);
 		cc[N] = *ureg8[Dest] >> 7;
@@ -801,7 +795,6 @@ void Subr(void)
 		*xfreg16[Dest] = (unsigned short)temp32;
 		cc[N] = (temp32 & 0x8000) >> 15;
 		cc[Z] = ZTEST(temp32);
-		O_REG = 0; // In case the Dest is the zero reg which can never be changed
 	}
 	CycleCounter += 4;
 }
@@ -833,8 +826,12 @@ void Sbcr(void)
 		}
 
 		temp16 = dest8 - source8 - cc[C];
-		if (Dest == 2) setcc((unsigned char)temp16);
-		*ureg8[Dest] = (unsigned char)temp16;
+		switch (Dest)
+		{
+			case 2: 				setcc((unsigned char)temp16); break;
+			case 4: case 5: break; // never assign to zero reg
+			default: 				*ureg8[Dest] = (unsigned char)temp16; break;
+		}
 		cc[C] = (temp16 & 0x100) >> 8;
 		cc[V] = cc[C] ^ ((dest8 ^ *ureg8[Dest] ^ source8) >> 7);
 		cc[N] = *ureg8[Dest] >> 7;
@@ -867,7 +864,6 @@ void Sbcr(void)
 		*xfreg16[Dest] = (unsigned short)temp32;
 		cc[N] = (temp32 & 0x8000) >> 15;
 		cc[Z] = ZTEST(temp32);
-		O_REG = 0; // In case the Dest is the zero reg which can never be changed
 	}
 	CycleCounter += 4;
 }
@@ -899,8 +895,12 @@ void Andr(void)
 		}
 
 		temp8 = dest8 & source8;
-		if (Dest == 2) setcc((unsigned char)temp8);
-		else *ureg8[Dest] = temp8;
+		switch (Dest)
+		{
+			case 2: 				setcc((unsigned char)temp8); break;
+			case 4: case 5: break; // never assign to zero reg
+			default: 				*ureg8[Dest] = (unsigned char)temp8; break;
+		}
 		cc[N] = temp8 >> 7;
 		cc[Z] = ZTEST(temp8);
 	}
@@ -929,7 +929,6 @@ void Andr(void)
 		*xfreg16[Dest] = temp16;
 		cc[N] = temp16 >> 15;
 		cc[Z] = ZTEST(temp16);
-		O_REG = 0; // In case the Dest is the zero reg which can never be changed
 	}
 	cc[V] = 0;
 	CycleCounter += 4;
@@ -962,8 +961,12 @@ void Orr(void)
 		}
 
 		temp8 = dest8 | source8;
-		if (Dest == 2) setcc((unsigned char)temp8);
-		else *ureg8[Dest] = temp8;
+		switch (Dest)
+		{
+			case 2: 				setcc((unsigned char)temp8); break;
+			case 4: case 5: break; // never assign to zero reg
+			default: 				*ureg8[Dest] = (unsigned char)temp8; break;
+		}
 		cc[N] = temp8 >> 7;
 		cc[Z] = ZTEST(temp8);
 	}
@@ -992,7 +995,6 @@ void Orr(void)
 		*xfreg16[Dest] = temp16;
 		cc[N] = temp16 >> 15;
 		cc[Z] = ZTEST(temp16);
-		O_REG = 0; // In case the Dest is the zero reg which can never be changed
 	}
 	cc[V] = 0;
 	CycleCounter += 4;
@@ -1025,8 +1027,12 @@ void Eorr(void)
 		}
 
 		temp8 = dest8 ^ source8;
-		if (Dest == 2) setcc((unsigned char)temp8);
-		else *ureg8[Dest] = temp8;
+		switch (Dest)
+		{
+			case 2: 				setcc((unsigned char)temp8); break;
+			case 4: case 5: break; // never assign to zero reg
+			default: 				*ureg8[Dest] = (unsigned char)temp8; break;
+		}
 		cc[N] = temp8 >> 7;
 		cc[Z] = ZTEST(temp8);
 	}
@@ -1055,7 +1061,6 @@ void Eorr(void)
 		*xfreg16[Dest] = temp16;
 		cc[N] = temp16 >> 15;
 		cc[Z] = ZTEST(temp16);
-		O_REG = 0; // In case the Dest is the zero reg which can never be changed
 	}
 	cc[V] = 0;
 	CycleCounter += 4;
@@ -1120,7 +1125,6 @@ void Cmpr(void)
 		cc[V] = !!((dest16 ^ source16 ^ temp32 ^ (temp32 >> 1)) & 0x8000);
 		cc[N] = (temp32 & 0x8000) >> 15;
 		cc[Z] = ZTEST(temp32);
-		O_REG = 0; // In case the Dest is the zero reg which can never be changed
 	}
 	CycleCounter += 4;
 }
@@ -1180,13 +1184,12 @@ void Swi2_I(void)
 
 void Negd_I(void)
 { //1040 Phase 5 6309
-	temp16= 0-D_REG;
+	D_REG = 0-D_REG;
 	cc[C] = temp16>0;
 	cc[V] = D_REG==0x8000;
-	cc[N] = NTEST16(temp16);
-	cc[Z] = ZTEST(temp16);
-	D_REG= temp16;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	cc[N] = NTEST16(D_REG);
+	cc[Z] = ZTEST(D_REG);
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Comd_I(void)
@@ -1196,7 +1199,7 @@ void Comd_I(void)
 	cc[N] = NTEST16(D_REG);
 	cc[C] = 1;
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Lsrd_I(void)
@@ -1205,7 +1208,7 @@ void Lsrd_I(void)
 	D_REG = D_REG>>1;
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Rord_I(void)
@@ -1215,7 +1218,7 @@ void Rord_I(void)
 	D_REG = (D_REG>>1) | postword;
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Asrd_I(void)
@@ -1224,7 +1227,7 @@ void Asrd_I(void)
 	D_REG = (D_REG & 0x8000) | (D_REG >> 1);
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Asld_I(void)
@@ -1234,7 +1237,7 @@ void Asld_I(void)
 	D_REG = D_REG<<1;
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Rold_I(void)
@@ -1245,7 +1248,7 @@ void Rold_I(void)
 	D_REG= (D_REG<<1) | postword;
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Decd_I(void)
@@ -1254,7 +1257,7 @@ void Decd_I(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = D_REG==0x7FFF;
 	cc[N] = NTEST16(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Incd_I(void)
@@ -1263,7 +1266,7 @@ void Incd_I(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = D_REG==0x8000;
 	cc[N] = NTEST16(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Tstd_I(void)
@@ -1271,7 +1274,7 @@ void Tstd_I(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Clrd_I(void)
@@ -1281,7 +1284,7 @@ void Clrd_I(void)
 	cc[V] = 0;
 	cc[N] = 0;
 	cc[Z] = 1;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Comw_I(void)
@@ -1291,7 +1294,7 @@ void Comw_I(void)
 	cc[N] = NTEST16(W_REG);
 	cc[C] = 1;
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Lsrw_I(void)
@@ -1300,7 +1303,7 @@ void Lsrw_I(void)
 	W_REG= W_REG>>1;
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Rorw_I(void)
@@ -1310,7 +1313,7 @@ void Rorw_I(void)
 	W_REG= (W_REG>>1) | postword;
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Rolw_I(void)
@@ -1321,7 +1324,7 @@ void Rolw_I(void)
 	W_REG= ( W_REG<<1) | postword;
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Decw_I(void)
@@ -1330,7 +1333,7 @@ void Decw_I(void)
 	cc[Z] = ZTEST(W_REG);
 	cc[V] = W_REG==0x7FFF;
 	cc[N] = NTEST16(W_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Incw_I(void)
@@ -1339,7 +1342,7 @@ void Incw_I(void)
 	cc[Z] = ZTEST(W_REG);
 	cc[V] = W_REG==0x8000;
 	cc[N] = NTEST16(W_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Tstw_I(void)
@@ -1347,7 +1350,7 @@ void Tstw_I(void)
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
 	cc[V] = 0;	
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Clrw_I(void)
@@ -1357,7 +1360,7 @@ void Clrw_I(void)
 	cc[V] = 0;
 	cc[N] = 0;
 	cc[Z] = 1;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Subw_M(void)
@@ -1370,7 +1373,7 @@ void Subw_M(void)
 	cc[Z] = ZTEST(temp16);
 	W_REG= temp16;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Cmpw_M(void)
@@ -1382,11 +1385,11 @@ void Cmpw_M(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Sbcd_M(void)
-{ //1082 P6309
+{ //1082 6309
 	postword=IMMADDRESS(PC_REG);
 	temp32=D_REG-postword-cc[C];
 	cc[C] = (temp32 & 0x10000)>>16;
@@ -1395,7 +1398,7 @@ void Sbcd_M(void)
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Cmpd_M(void)
@@ -1407,7 +1410,7 @@ void Cmpd_M(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Andd_M(void)
@@ -1417,7 +1420,7 @@ void Andd_M(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Bitd_M(void)
@@ -1427,7 +1430,7 @@ void Bitd_M(void)
 	cc[Z] = ZTEST(temp16);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Ldw_M(void)
@@ -1437,7 +1440,7 @@ void Ldw_M(void)
 	cc[N] = NTEST16(W_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Eord_M(void)
@@ -1447,7 +1450,7 @@ void Eord_M(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Adcd_M(void)
@@ -1461,7 +1464,7 @@ void Adcd_M(void)
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Ord_M(void)
@@ -1471,7 +1474,7 @@ void Ord_M(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Addw_M(void)
@@ -1484,7 +1487,7 @@ void Addw_M(void)
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Cmpy_M(void)
@@ -1496,7 +1499,7 @@ void Cmpy_M(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 	
 void Ldy_M(void)
@@ -1506,7 +1509,7 @@ void Ldy_M(void)
 	cc[N] = NTEST16(Y_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Subw_D(void)
@@ -1518,7 +1521,7 @@ void Subw_D(void)
 	W_REG = temp32;
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Cmpw_D(void)
@@ -1529,7 +1532,7 @@ void Cmpw_D(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,W_REG); 
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Sbcd_D(void)
@@ -1541,7 +1544,7 @@ void Sbcd_D(void)
 	D_REG= temp32;
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Cmpd_D(void)
@@ -1552,7 +1555,7 @@ void Cmpd_D(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,D_REG); 
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Andd_D(void)
@@ -1562,7 +1565,7 @@ void Andd_D(void)
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Bitd_D(void)
@@ -1571,7 +1574,7 @@ void Bitd_D(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Ldw_D(void)
@@ -1580,7 +1583,7 @@ void Ldw_D(void)
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Stw_D(void)
@@ -1589,7 +1592,7 @@ void Stw_D(void)
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Eord_D(void)
@@ -1598,7 +1601,7 @@ void Eord_D(void)
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Adcd_D(void)
@@ -1611,7 +1614,7 @@ void Adcd_D(void)
 	D_REG = temp32;
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Ord_D(void)
@@ -1620,7 +1623,7 @@ void Ord_D(void)
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Addw_D(void)
@@ -1632,7 +1635,7 @@ void Addw_D(void)
 	W_REG = temp32;
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Cmpy_D(void)
@@ -1643,7 +1646,7 @@ void Cmpy_D(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,Y_REG);
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Ldy_D(void)
@@ -1652,7 +1655,7 @@ void Ldy_D(void)
 	cc[Z] = ZTEST(Y_REG);	
 	cc[N] = NTEST16(Y_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 	
 void Sty_D(void)
@@ -1661,7 +1664,7 @@ void Sty_D(void)
 	cc[Z] = ZTEST(Y_REG);
 	cc[N] = NTEST16(Y_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Subw_X(void)
@@ -1673,7 +1676,7 @@ void Subw_X(void)
 	W_REG= temp32;
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Cmpw_X(void)
@@ -1684,7 +1687,7 @@ void Cmpw_X(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,W_REG);
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Sbcd_X(void)
@@ -1696,7 +1699,7 @@ void Sbcd_X(void)
 	D_REG= temp32;
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Cmpd_X(void)
@@ -1707,7 +1710,7 @@ void Cmpd_X(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,D_REG);
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Andd_X(void)
@@ -1716,7 +1719,7 @@ void Andd_X(void)
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Bitd_X(void)
@@ -1725,7 +1728,7 @@ void Bitd_X(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Ldw_X(void)
@@ -1752,7 +1755,7 @@ void Eord_X(void)
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Adcd_X(void)
@@ -1765,7 +1768,7 @@ void Adcd_X(void)
 	D_REG = temp32;
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Ord_X(void)
@@ -1774,7 +1777,7 @@ void Ord_X(void)
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Addw_X(void)
@@ -1786,7 +1789,7 @@ void Addw_X(void)
 	W_REG= temp32;
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Cmpy_X(void)
@@ -1797,7 +1800,7 @@ void Cmpy_X(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,Y_REG);
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Ldy_X(void)
@@ -1828,7 +1831,7 @@ void Subw_E(void)
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Cmpw_E(void)
@@ -1840,7 +1843,7 @@ void Cmpw_E(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Sbcd_E(void)
@@ -1853,7 +1856,7 @@ void Sbcd_E(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Cmpd_E(void)
@@ -1865,7 +1868,7 @@ void Cmpd_E(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Andd_E(void)
@@ -1875,7 +1878,7 @@ void Andd_E(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Bitd_E(void)
@@ -1885,7 +1888,7 @@ void Bitd_E(void)
 	cc[Z] = ZTEST(temp16);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Ldw_E(void)
@@ -1895,7 +1898,7 @@ void Ldw_E(void)
 	cc[N] = NTEST16(W_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Stw_E(void)
@@ -1905,7 +1908,7 @@ void Stw_E(void)
 	cc[N] = NTEST16(W_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Eord_E(void)
@@ -1915,7 +1918,7 @@ void Eord_E(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Adcd_E(void)
@@ -1929,7 +1932,7 @@ void Adcd_E(void)
 	cc[N] = NTEST16(D_REG);
 	cc[Z] = ZTEST(D_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Ord_E(void)
@@ -1939,7 +1942,7 @@ void Ord_E(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Addw_E(void)
@@ -1952,7 +1955,7 @@ void Addw_E(void)
 	cc[Z] = ZTEST(W_REG);
 	cc[N] = NTEST16(W_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Cmpy_E(void)
@@ -1964,7 +1967,7 @@ void Cmpy_E(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Ldy_E(void)
@@ -1974,7 +1977,7 @@ void Ldy_E(void)
 	cc[N] = NTEST16(Y_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Sty_E(void)
@@ -1984,7 +1987,7 @@ void Sty_E(void)
 	cc[N] = NTEST16(Y_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Lds_I(void)
@@ -2003,7 +2006,7 @@ void Ldq_D(void)
 	cc[Z] = ZTEST(Q_REG);
 	cc[N] = NTEST32(Q_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M87];
+	CycleCounter+=NatEmuCycles87;
 }
 
 void Stq_D(void)
@@ -2012,7 +2015,7 @@ void Stq_D(void)
 	cc[Z] = ZTEST(Q_REG);
 	cc[N] = NTEST32(Q_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M87];
+	CycleCounter+=NatEmuCycles87;
 }
 
 void Lds_D(void)
@@ -2021,7 +2024,7 @@ void Lds_D(void)
 	cc[Z] = ZTEST(S_REG);
 	cc[N] = NTEST16(S_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Sts_D(void)
@@ -2030,7 +2033,7 @@ void Sts_D(void)
 	cc[Z] = ZTEST(S_REG);
 	cc[N] = NTEST16(S_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Ldq_X(void)
@@ -2077,7 +2080,7 @@ void Ldq_E(void)
 	cc[N] = NTEST32(Q_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M98];
+	CycleCounter+=NatEmuCycles98;
 }
 
 void Stq_E(void)
@@ -2087,7 +2090,7 @@ void Stq_E(void)
 	cc[N] = NTEST32(Q_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M98];
+	CycleCounter+=NatEmuCycles98;
 }
 
 void Lds_E(void)
@@ -2097,7 +2100,7 @@ void Lds_E(void)
 	cc[N] = NTEST16(S_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Sts_E(void)
@@ -2107,7 +2110,7 @@ void Sts_E(void)
 	cc[N] = NTEST16(S_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Band(void)
@@ -2138,7 +2141,7 @@ void Band(void)
     }
 	}
 	// Else nothing changes
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Biand(void)
@@ -2169,7 +2172,7 @@ void Biand(void)
     }
   }
 	// Else do nothing
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Bor(void)
@@ -2200,7 +2203,7 @@ void Bor(void)
     }
 	}
 	// Else do nothing
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Bior(void)
@@ -2231,7 +2234,7 @@ void Bior(void)
     }
   }
 	// Else do nothing
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Beor(void)
@@ -2261,7 +2264,7 @@ void Beor(void)
       break;
     }
 	}
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Bieor(void)
@@ -2291,7 +2294,7 @@ void Bieor(void)
       break;
     }
   }
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Ldbt(void)
@@ -2334,7 +2337,7 @@ void Ldbt(void)
       break;
     }
 	}
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Stbt(void)
@@ -2372,11 +2375,18 @@ void Stbt(void)
 		temp8 &= ~(1 << Dest);
 	}
 	MemWrite8(temp8, temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M87];
+	CycleCounter+=NatEmuCycles87;
 }
 
 void Tfm1(void)
 { //1138 TFM R+,R+ 6309
+	if (W_REG == 0)
+	{
+    CycleCounter += 6;
+    PC_REG++;
+		return;
+  }
+
 	postbyte=MemRead8(PC_REG);
 	Source=postbyte>>4;
 	Dest=postbyte&15;
@@ -2392,21 +2402,19 @@ void Tfm1(void)
   (*xfreg16[Dest])++;
   (*xfreg16[Source])++;
   W_REG--;
-
-	if ((W_REG)!=0)
-	{
-    CycleCounter += 3;
-    PC_REG -= 2;
-  }
-	else
-	{
-    CycleCounter += 6;
-    PC_REG++;
-  }
+	CycleCounter += 3;
+	PC_REG -= 2;
 }
 
 void Tfm2(void)
-{ //1139 TFM R-,R- Phase 3
+{ //1139 TFM R-,R- Phase 3 6309
+	if (W_REG == 0)
+	{
+		CycleCounter+=6;
+		PC_REG++;
+		return;
+	}			
+
 	postbyte=MemRead8(PC_REG);
 	Source=postbyte>>4;
 	Dest=postbyte&15;
@@ -2422,21 +2430,19 @@ void Tfm2(void)
   (*xfreg16[Dest])--;
   (*xfreg16[Source])--;
   W_REG--;
-
-	if (W_REG!=0)
-	{
-		CycleCounter+=3;
-		PC_REG-=2;
-	}
-	else
-	{
-		CycleCounter+=6;
-		PC_REG++;
-	}			
+	CycleCounter+=3;
+	PC_REG-=2;
 }
 
 void Tfm3(void)
 { //113A 6309 TFM R+,R 6309
+	if (W_REG == 0)
+	{
+		CycleCounter+=6;
+		PC_REG++;
+		return;
+	}			
+
 	postbyte = MemRead8(PC_REG);
 	Source = postbyte >> 4;
 	Dest = postbyte & 15;
@@ -2451,21 +2457,19 @@ void Tfm3(void)
   MemWrite8(temp8, *xfreg16[Dest]);
   (*xfreg16[Source])++;
   W_REG--;
-
-  if (W_REG!=0)
-  {
-    PC_REG -= 2; //Hit the same instruction on the next loop if not done copying
-		CycleCounter += 3;
-	}
-	else
-	{
-		CycleCounter += 6;
-		PC_REG++;
-	}
+	PC_REG -= 2; //Hit the same instruction on the next loop if not done copying
+	CycleCounter += 3;
 }
 
 void Tfm4(void)
 { //113B TFM R,R+ 6309 
+	if (W_REG == 0)
+	{
+		CycleCounter+=6;
+		PC_REG++;
+		return;
+	}			
+
 	postbyte=MemRead8(PC_REG);
 	Source=postbyte>>4;
 	Dest=postbyte&15;
@@ -2480,17 +2484,8 @@ void Tfm4(void)
   MemWrite8(temp8, *xfreg16[Dest]);
   (*xfreg16[Dest])++;
   W_REG--;
-
-	if (W_REG!=0)
-	{
-		PC_REG-=2; //Hit the same instruction on the next loop if not done copying
-		CycleCounter+=3;
-	}
-	else
-	{
-		CycleCounter+=6;
-		PC_REG++;
-	}
+	PC_REG-=2; //Hit the same instruction on the next loop if not done copying
+	CycleCounter+=3;
 }
 
 void Bitmd_M(void)
@@ -2542,7 +2537,7 @@ void Come_I(void)
 	cc[N] = NTEST8(E_REG);
 	cc[C] = 1;
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Dece_I(void)
@@ -2551,7 +2546,7 @@ void Dece_I(void)
 	cc[Z] = ZTEST(E_REG);
 	cc[N] = NTEST8(E_REG);
 	cc[V] = E_REG==0x7F;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Ince_I(void)
@@ -2560,7 +2555,7 @@ void Ince_I(void)
 	cc[Z] = ZTEST(E_REG);
 	cc[N] = NTEST8(E_REG);
 	cc[V] = E_REG==0x80;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Tste_I(void)
@@ -2568,7 +2563,7 @@ void Tste_I(void)
 	cc[Z] = ZTEST(E_REG);
 	cc[N] = NTEST8(E_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Clre_I(void)
@@ -2578,7 +2573,7 @@ void Clre_I(void)
 	cc[V] = 0;
 	cc[N] = 0;
 	cc[Z] = 1;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Comf_I(void)
@@ -2588,7 +2583,7 @@ void Comf_I(void)
 	cc[N] = NTEST8(F_REG);
 	cc[C] = 1;
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Decf_I(void)
@@ -2597,7 +2592,7 @@ void Decf_I(void)
 	cc[Z] = ZTEST(F_REG);
 	cc[N] = NTEST8(F_REG);
 	cc[V] = F_REG==0x7F;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Incf_I(void)
@@ -2606,7 +2601,7 @@ void Incf_I(void)
 	cc[Z] = ZTEST(F_REG);
 	cc[N] = NTEST8(F_REG);
 	cc[V] = F_REG==0x80;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Tstf_I(void)
@@ -2614,7 +2609,7 @@ void Tstf_I(void)
 	cc[Z] = ZTEST(F_REG);
 	cc[N] = NTEST8(F_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Clrf_I(void)
@@ -2624,7 +2619,7 @@ void Clrf_I(void)
 	cc[V] = 0;
 	cc[N] = 0;
 	cc[Z] = 1;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Sube_M(void)
@@ -2659,7 +2654,7 @@ void Cmpu_M(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;	
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Lde_M(void)
@@ -2693,7 +2688,7 @@ void Cmps_M(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Divd_M(void)
@@ -2800,7 +2795,7 @@ void Sube_D(void)
 	E_REG= (unsigned char)temp16;
 	cc[Z] = ZTEST(E_REG);
 	cc[N] = NTEST8(E_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Cmpe_D(void)
@@ -2811,7 +2806,7 @@ void Cmpe_D(void)
 	cc[V] = OVERFLOW8(cc[C],postbyte,temp8,E_REG);
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Cmpu_D(void)
@@ -2822,7 +2817,7 @@ void Cmpu_D(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,U_REG);
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 	}
 
 void Lde_D(void)
@@ -2831,7 +2826,7 @@ void Lde_D(void)
 	cc[Z] = ZTEST(E_REG);
 	cc[N] = NTEST8(E_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Ste_D(void)
@@ -2840,7 +2835,7 @@ void Ste_D(void)
 	cc[Z] = ZTEST(E_REG);
 	cc[N] = NTEST8(E_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Adde_D(void)
@@ -2853,7 +2848,7 @@ void Adde_D(void)
 	E_REG= (unsigned char)temp16;
 	cc[N] = NTEST8(E_REG);
 	cc[Z] =ZTEST(E_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Cmps_D(void)
@@ -2864,7 +2859,7 @@ void Cmps_D(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,S_REG);
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Divd_D(void)
@@ -2929,7 +2924,7 @@ void Divq_D(void)
 		cc[N] = 0;
 		cc[Z] = 0;
 		cc[C] = 0;
-		CycleCounter+=InsCycles[md[NATIVE6309]][M3635]-21;
+		CycleCounter+=NatEmuCycles3635-21;
 		return;
 	}
 
@@ -2947,7 +2942,7 @@ void Divq_D(void)
 		cc[V] = 0;
 	}
 	cc[C] = B_REG & 1;
-  CycleCounter+=InsCycles[md[NATIVE6309]][M3635];
+  CycleCounter+=NatEmuCycles3635;
 }
 
 void Muld_D(void)
@@ -2957,7 +2952,7 @@ void Muld_D(void)
 	cc[Z] = ZTEST(Q_REG);
 	cc[V] = 0;
 	cc[N] = NTEST32(Q_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M3029];
+	CycleCounter+=NatEmuCycles3029;
 }
 
 void Sube_X(void)
@@ -2991,7 +2986,7 @@ void Cmpu_X(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,U_REG);
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Lde_X(void)
@@ -3033,7 +3028,7 @@ void Cmps_X(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,S_REG);
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Divd_X(void)
@@ -3098,7 +3093,7 @@ void Divq_X(void)
     cc[N] = 0;
     cc[Z] = 0;
     cc[C] = 0;
-    CycleCounter += InsCycles[md[NATIVE6309]][M3635] - 21;
+    CycleCounter += NatEmuCycles3635 - 21;
     return;
   }
 
@@ -3116,7 +3111,7 @@ void Divq_X(void)
     cc[V] = 0;
   }
   cc[C] = B_REG & 1;
-  CycleCounter += InsCycles[md[NATIVE6309]][M3635];
+  CycleCounter += NatEmuCycles3635;
 }
 
 void Muld_X(void)
@@ -3139,7 +3134,7 @@ void Sube_E(void)
 	cc[Z] = ZTEST(E_REG);
 	cc[N] = NTEST8(E_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Cmpe_E(void)
@@ -3151,7 +3146,7 @@ void Cmpe_E(void)
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Cmpu_E(void)
@@ -3163,7 +3158,7 @@ void Cmpu_E(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Lde_E(void)
@@ -3173,7 +3168,7 @@ void Lde_E(void)
 	cc[N] = NTEST8(E_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Ste_E(void)
@@ -3183,7 +3178,7 @@ void Ste_E(void)
 	cc[N] = NTEST8(E_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Adde_E(void)
@@ -3197,7 +3192,7 @@ void Adde_E(void)
 	cc[N] = NTEST8(E_REG);
 	cc[Z] = ZTEST(E_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Cmps_E(void)
@@ -3209,7 +3204,7 @@ void Cmps_E(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M86];
+	CycleCounter+=NatEmuCycles86;
 }
 
 void Divd_E(void)
@@ -3276,7 +3271,7 @@ void Divq_E(void)
     cc[N] = 0;
     cc[Z] = 0;
     cc[C] = 0;
-    CycleCounter += InsCycles[md[NATIVE6309]][M3635] - 21;
+    CycleCounter += NatEmuCycles3635 - 21;
     return;
   }
 
@@ -3294,7 +3289,7 @@ void Divq_E(void)
     cc[V] = 0;
   }
   cc[C] = B_REG & 1;
-  CycleCounter += InsCycles[md[NATIVE6309]][M3635];
+  CycleCounter += NatEmuCycles3635;
 }
 
 void Muld_E(void)
@@ -3305,7 +3300,7 @@ void Muld_E(void)
 	cc[Z] = ZTEST(Q_REG);
 	cc[V] = 0;
 	cc[N] = NTEST32(Q_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M3130];
+	CycleCounter+=NatEmuCycles3130;
 }
 
 void Subf_M(void)
@@ -3362,7 +3357,7 @@ void Subf_D(void)
 	F_REG= (unsigned char)temp16;
 	cc[Z] = ZTEST(F_REG);
 	cc[N] = NTEST8(F_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Cmpf_D(void)
@@ -3373,7 +3368,7 @@ void Cmpf_D(void)
 	cc[V] = OVERFLOW8(cc[C],postbyte,temp8,F_REG);
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Ldf_D(void)
@@ -3382,7 +3377,7 @@ void Ldf_D(void)
 	cc[Z] = ZTEST(F_REG);
 	cc[N] = NTEST8(F_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Stf_D(void)
@@ -3391,7 +3386,7 @@ void Stf_D(void)
 	cc[Z] = ZTEST(F_REG);
 	cc[N] = NTEST8(F_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Addf_D(void)
@@ -3404,7 +3399,7 @@ void Addf_D(void)
 	F_REG= (unsigned char)temp16;
 	cc[N] = NTEST8(F_REG);
 	cc[Z] = ZTEST(F_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Subf_X(void)
@@ -3471,7 +3466,7 @@ void Subf_E(void)
 	cc[Z] = ZTEST(F_REG);
 	cc[N] = NTEST8(F_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Cmpf_E(void)
@@ -3483,7 +3478,7 @@ void Cmpf_E(void)
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Ldf_E(void)
@@ -3493,7 +3488,7 @@ void Ldf_E(void)
 	cc[N] = NTEST8(F_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Stf_E(void)
@@ -3503,7 +3498,7 @@ void Stf_E(void)
 	cc[N] = NTEST8(F_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Addf_E(void)
@@ -3517,12 +3512,12 @@ void Addf_E(void)
 	cc[N] = NTEST8(F_REG);
 	cc[Z] = ZTEST(F_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Nop_I(void)
 {	//12
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Sync_I(void)
@@ -3547,7 +3542,7 @@ void Lbra_R(void)
 	*spostword=IMMADDRESS(PC_REG);
 	PC_REG+=2;
 	PC_REG+=*spostword;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Lbsr_R(void)
@@ -3558,7 +3553,7 @@ void Lbsr_R(void)
 	MemWrite8(pc.B.lsb,S_REG--);
 	MemWrite8(pc.B.msb,S_REG);
 	PC_REG+=*spostword;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M97];
+	CycleCounter+=NatEmuCycles97;
 }
 
 void Daa_I(void)
@@ -3582,7 +3577,7 @@ void Daa_I(void)
 	A_REG= (unsigned char)temp16;
 	cc[N] = NTEST8(A_REG);
 	cc[Z] = ZTEST(A_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Orcc_M(void)
@@ -3591,7 +3586,7 @@ void Orcc_M(void)
 	temp8=getcc();
 	temp8 = (temp8 | postbyte);
 	setcc(temp8);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M32];
+	CycleCounter+=NatEmuCycles32;
 }
 
 void Andcc_M(void)
@@ -3608,7 +3603,7 @@ void Sex_I(void)
 	A_REG= 0-(B_REG>>7);
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = D_REG >> 15;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Exg_M(void)
@@ -3625,8 +3620,9 @@ void Exg_M(void)
 			Source &= 0x07;
 			Dest &= 0x07;
 			temp8 = (*ureg8[Source]);
-			if (Source != 4 && Source != 5) (*ureg8[Source]) = (*ureg8[Dest]);
-			if (Dest!=4 && Dest!=5) (*ureg8[Dest]) = temp8;
+			*ureg8[Source] = (*ureg8[Dest]);
+			*ureg8[Dest] = temp8;
+			O_REG = 0; // Just in case Zero reg was used
 		}
 		else // 16 bit EXG
 		{
@@ -3672,7 +3668,7 @@ void Exg_M(void)
 		}
 	}
 	setcc(ccbits);
-	CycleCounter += InsCycles[md[NATIVE6309]][M85];
+	CycleCounter += NatEmuCycles85;
 }
 
 void Tfr_M(void)
@@ -3680,36 +3676,41 @@ void Tfr_M(void)
 	postbyte=MemRead8(PC_REG++);
 	Source= postbyte>>4;
 	Dest=postbyte & 15;
-	ccbits = getcc();
 
 	if (Dest < 8)
+	{
 		if (Source < 8)
 			*xfreg16[Dest] = *xfreg16[Source];
 		else
 			*xfreg16[Dest] = (*ureg8[Source & 7] << 8) | *ureg8[Source & 7];
+	}
 	else
 	{
+		ccbits = getcc();
+		Dest &= 7;
+
 		if (Source < 8)
 			switch (Dest)
 			{
-			case 8:
-			case 11:
-			case 14:
-				*ureg8[Dest & 7] = *xfreg16[Source] >> 8;
+			case 0:  // A
+			case 3: // DP
+			case 6: // E
+				*ureg8[Dest] = *xfreg16[Source] >> 8;
 				break;
-			case 9:
-			case 10:
-			case 15:
-				*ureg8[Dest & 7] = *xfreg16[Source] & 0xFF;
+			case 1:  // B
+			case 2: // CC
+			case 7: // F
+				*ureg8[Dest] = *xfreg16[Source] & 0xFF;
 				break;
 			}
 		else
-			*ureg8[Dest & 7] = *ureg8[Source & 7];
+			*ureg8[Dest] = *ureg8[Source & 7];
 
+		O_REG = 0; // Just in case Zero reg was used
 		setcc(ccbits);
 	}
 	
-	CycleCounter+=InsCycles[md[NATIVE6309]][M64];
+	CycleCounter+=NatEmuCycles64;
 }
 
 void Bra_R(void)
@@ -3911,7 +3912,7 @@ void Pshs_M(void)
 		CycleCounter+=1;
 	}
 
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Puls_M(void)
@@ -3961,7 +3962,7 @@ void Puls_M(void)
 		pc.B.lsb=MemRead8( S_REG++);
 		CycleCounter+=2;
 	}
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Pshu_M(void)
@@ -4011,7 +4012,7 @@ void Pshu_M(void)
 		MemWrite8(getcc(),--U_REG);
 		CycleCounter+=1;
 	}
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Pulu_M(void)
@@ -4061,20 +4062,20 @@ void Pulu_M(void)
 		pc.B.lsb=MemRead8( U_REG++);
 		CycleCounter+=2;
 	}
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Rts_I(void)
 { //39
 	pc.B.msb=MemRead8(S_REG++);
 	pc.B.lsb=MemRead8(S_REG++);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M51];
+	CycleCounter+=NatEmuCycles51;
 }
 
 void Abx_I(void)
 { //3A
 	X_REG=X_REG+B_REG;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M31];
+	CycleCounter+=NatEmuCycles31;
 }
 
 void Rti_I(void)
@@ -4120,7 +4121,7 @@ void Mul_I(void)
 	D_REG = A_REG * B_REG;
 	cc[C] = B_REG >0x7F;
 	cc[Z] = ZTEST(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M1110];
+	CycleCounter+=NatEmuCycles1110;
 }
 
 void Reset(void) // 3E
@@ -4163,7 +4164,7 @@ void Nega_I(void)
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
 	A_REG= temp8;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Coma_I(void)
@@ -4173,7 +4174,7 @@ void Coma_I(void)
 	cc[N] = NTEST8(A_REG);
 	cc[C] = 1;
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Lsra_I(void)
@@ -4182,7 +4183,7 @@ void Lsra_I(void)
 	A_REG= A_REG>>1;
 	cc[Z] = ZTEST(A_REG);
 	cc[N] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Rora_I(void)
@@ -4192,7 +4193,7 @@ void Rora_I(void)
 	A_REG= (A_REG>>1) | postbyte;
 	cc[Z] = ZTEST(A_REG);
 	cc[N] = NTEST8(A_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Asra_I(void)
@@ -4201,7 +4202,7 @@ void Asra_I(void)
 	A_REG= (A_REG & 0x80) | (A_REG >> 1);
 	cc[Z] = ZTEST(A_REG);
 	cc[N] = NTEST8(A_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Asla_I(void)
@@ -4211,7 +4212,7 @@ void Asla_I(void)
 	A_REG= A_REG<<1;
 	cc[N] = NTEST8(A_REG);
 	cc[Z] = ZTEST(A_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Rola_I(void)
@@ -4222,7 +4223,7 @@ void Rola_I(void)
 	A_REG= (A_REG<<1) | postbyte;
 	cc[Z] = ZTEST(A_REG);
 	cc[N] = NTEST8(A_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Deca_I(void)
@@ -4231,7 +4232,7 @@ void Deca_I(void)
 	cc[Z] = ZTEST(A_REG);
 	cc[V] = A_REG==0x7F;
 	cc[N] = NTEST8(A_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Inca_I(void)
@@ -4240,7 +4241,7 @@ void Inca_I(void)
 	cc[Z] = ZTEST(A_REG);
 	cc[V] = A_REG==0x80;
 	cc[N] = NTEST8(A_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Tsta_I(void)
@@ -4248,7 +4249,7 @@ void Tsta_I(void)
 	cc[Z] = ZTEST(A_REG);
 	cc[N] = NTEST8(A_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Clra_I(void)
@@ -4258,7 +4259,7 @@ void Clra_I(void)
 	cc[V] = 0;
 	cc[N] =0;
 	cc[Z] =1;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Negb_I(void)
@@ -4269,7 +4270,7 @@ void Negb_I(void)
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
 	B_REG= temp8;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Comb_I(void)
@@ -4279,7 +4280,7 @@ void Comb_I(void)
 	cc[N] = NTEST8(B_REG);
 	cc[C] = 1;
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Lsrb_I(void)
@@ -4288,7 +4289,7 @@ void Lsrb_I(void)
 	B_REG= B_REG>>1;
 	cc[Z] = ZTEST(B_REG);
 	cc[N] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Rorb_I(void)
@@ -4298,7 +4299,7 @@ void Rorb_I(void)
 	B_REG= (B_REG>>1) | postbyte;
 	cc[Z] = ZTEST(B_REG);
 	cc[N] = NTEST8(B_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Asrb_I(void)
@@ -4307,7 +4308,7 @@ void Asrb_I(void)
 	B_REG= (B_REG & 0x80) | (B_REG >> 1);
 	cc[Z] = ZTEST(B_REG);
 	cc[N] = NTEST8(B_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Aslb_I(void)
@@ -4317,7 +4318,7 @@ void Aslb_I(void)
 	B_REG= B_REG<<1;
 	cc[N] = NTEST8(B_REG);
 	cc[Z] = ZTEST(B_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Rolb_I(void)
@@ -4328,7 +4329,7 @@ void Rolb_I(void)
 	B_REG= (B_REG<<1) | postbyte;
 	cc[Z] = ZTEST(B_REG);
 	cc[N] = NTEST8(B_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Decb_I(void)
@@ -4337,7 +4338,7 @@ void Decb_I(void)
 	cc[Z] = ZTEST(B_REG);
 	cc[V] = B_REG==0x7F;
 	cc[N] = NTEST8(B_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Incb_I(void)
@@ -4346,7 +4347,7 @@ void Incb_I(void)
 	cc[Z] = ZTEST(B_REG);
 	cc[V] = B_REG==0x80; 
 	cc[N] = NTEST8(B_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Tstb_I(void)
@@ -4354,7 +4355,7 @@ void Tstb_I(void)
 	cc[Z] = ZTEST(B_REG);
 	cc[N] = NTEST8(B_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Clrb_I(void)
@@ -4364,7 +4365,7 @@ void Clrb_I(void)
 	cc[N] =0;
 	cc[V] = 0;
 	cc[Z] =1;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M21];
+	CycleCounter+=NatEmuCycles21;
 }
 
 void Neg_X(void)
@@ -4534,7 +4535,7 @@ void Tst_X(void)
 	cc[Z] = ZTEST(temp8);
 	cc[N] = NTEST8(temp8);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Jmp_X(void)
@@ -4564,7 +4565,7 @@ void Neg_E(void)
 	cc[Z] = ZTEST(temp8);
 	MemWrite8(temp8,temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Oim_E(void)
@@ -4604,7 +4605,7 @@ void Com_E(void)
 	cc[V] = 0;
 	MemWrite8(temp8,temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Lsr_E(void)
@@ -4617,7 +4618,7 @@ void Lsr_E(void)
 	cc[N] = 0;
 	MemWrite8(temp8,temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Eim_E(void)
@@ -4644,7 +4645,7 @@ void Ror_E(void)
 	cc[N] = NTEST8(temp8);
 	MemWrite8(temp8,temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Asr_E(void)
@@ -4657,7 +4658,7 @@ void Asr_E(void)
 	cc[N] = NTEST8(temp8);
 	MemWrite8(temp8,temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Asl_E(void)
@@ -4671,7 +4672,7 @@ void Asl_E(void)
 	cc[Z] = ZTEST(temp8);
 	MemWrite8(temp8,temp16);	
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Rol_E(void)
@@ -4686,7 +4687,7 @@ void Rol_E(void)
 	cc[N] = NTEST8(temp8);
 	MemWrite8(temp8,temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Dec_E(void)
@@ -4699,7 +4700,7 @@ void Dec_E(void)
 	cc[V] = temp8==0x7F;
 	MemWrite8(temp8,temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Tim_E(void)
@@ -4724,7 +4725,7 @@ void Inc_E(void)
 	cc[N] = NTEST8(temp8);
 	MemWrite8(temp8,temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Tst_E(void)
@@ -4734,13 +4735,13 @@ void Tst_E(void)
 	cc[N] = NTEST8(temp8);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Jmp_E(void)
 { //7E
 	PC_REG=IMMADDRESS(PC_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Clr_E(void)
@@ -4751,7 +4752,7 @@ void Clr_E(void)
 	cc[V] = 0;
 	cc[Z] = 1;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Suba_M(void)
@@ -4799,7 +4800,7 @@ void Subd_M(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Anda_M(void)
@@ -4882,7 +4883,7 @@ void Cmpx_M(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Bsr_R(void)
@@ -4892,7 +4893,7 @@ void Bsr_R(void)
 	MemWrite8(pc.B.lsb,S_REG--);
 	MemWrite8(pc.B.msb,S_REG);
 	PC_REG+=*spostbyte;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Ldx_M(void)
@@ -4914,7 +4915,7 @@ void Suba_D(void)
 	A_REG = (unsigned char)temp16;
 	cc[Z] = ZTEST(A_REG);
 	cc[N] = NTEST8(A_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }	
 
 void Cmpa_D(void)
@@ -4925,7 +4926,7 @@ void Cmpa_D(void)
 	cc[V] = OVERFLOW8(cc[C],postbyte,temp8,A_REG);
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Scba_D(void)
@@ -4937,7 +4938,7 @@ void Scba_D(void)
 	A_REG = (unsigned char)temp16;
 	cc[N] = NTEST8(A_REG);
 	cc[Z] = ZTEST(A_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Subd_D(void)
@@ -4949,7 +4950,7 @@ void Subd_D(void)
 	D_REG = temp32;
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M64];
+	CycleCounter+=NatEmuCycles64;
 }
 
 void Anda_D(void)
@@ -4958,7 +4959,7 @@ void Anda_D(void)
 	cc[N] = NTEST8(A_REG);
 	cc[Z] = ZTEST(A_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Bita_D(void)
@@ -4967,7 +4968,7 @@ void Bita_D(void)
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Lda_D(void)
@@ -4976,7 +4977,7 @@ void Lda_D(void)
 	cc[Z] = ZTEST(A_REG);
 	cc[N] = NTEST8(A_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Sta_D(void)
@@ -4985,7 +4986,7 @@ void Sta_D(void)
 	cc[Z] = ZTEST(A_REG);
 	cc[N] = NTEST8(A_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Eora_D(void)
@@ -4994,7 +4995,7 @@ void Eora_D(void)
 	cc[N] = NTEST8(A_REG);
 	cc[Z] = ZTEST(A_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Adca_D(void)
@@ -5007,7 +5008,7 @@ void Adca_D(void)
 	A_REG= (unsigned char)temp16;
 	cc[N] = NTEST8(A_REG);
 	cc[Z] = ZTEST(A_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Ora_D(void)
@@ -5016,7 +5017,7 @@ void Ora_D(void)
 	cc[N] = NTEST8(A_REG);
 	cc[Z] = ZTEST(A_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Adda_D(void)
@@ -5029,7 +5030,7 @@ void Adda_D(void)
 	A_REG= (unsigned char)temp16;
 	cc[N] = NTEST8(A_REG);
 	cc[Z] = ZTEST(A_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Cmpx_D(void)
@@ -5040,7 +5041,7 @@ void Cmpx_D(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,X_REG);
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M64];
+	CycleCounter+=NatEmuCycles64;
 }
 
 void Jsr_D(void)
@@ -5050,7 +5051,7 @@ void Jsr_D(void)
 	MemWrite8(pc.B.lsb,S_REG--);
 	MemWrite8(pc.B.msb,S_REG);
 	PC_REG=temp16;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Ldx_D(void)
@@ -5059,7 +5060,7 @@ void Ldx_D(void)
 	cc[Z] = ZTEST(X_REG);	
 	cc[N] = NTEST16(X_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Stx_D(void)
@@ -5068,7 +5069,7 @@ void Stx_D(void)
 	cc[Z] = ZTEST(X_REG);
 	cc[N] = NTEST16(X_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Suba_X(void)
@@ -5115,7 +5116,7 @@ void Subd_X(void)
 	D_REG = temp32;
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Anda_X(void)
@@ -5206,7 +5207,7 @@ void Cmpx_X(void)
 	cc[V] = OVERFLOW16(cc[C],postword,temp16,X_REG);
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Jsr_X(void)
@@ -5216,7 +5217,7 @@ void Jsr_X(void)
 	MemWrite8(pc.B.lsb,S_REG--);
 	MemWrite8(pc.B.msb,S_REG);
 	PC_REG=temp16;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Ldx_X(void)
@@ -5247,7 +5248,7 @@ void Suba_E(void)
 	cc[Z] = ZTEST(A_REG);
 	cc[N] = NTEST8(A_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Cmpa_E(void)
@@ -5259,7 +5260,7 @@ void Cmpa_E(void)
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Sbca_E(void)
@@ -5272,7 +5273,7 @@ void Sbca_E(void)
 	cc[N] = NTEST8(A_REG);
 	cc[Z] = ZTEST(A_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Subd_E(void)
@@ -5285,7 +5286,7 @@ void Subd_E(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Anda_E(void)
@@ -5296,7 +5297,7 @@ void Anda_E(void)
 	cc[Z] = ZTEST(A_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Bita_E(void)
@@ -5306,7 +5307,7 @@ void Bita_E(void)
 	cc[Z] = ZTEST(temp8);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Lda_E(void)
@@ -5316,7 +5317,7 @@ void Lda_E(void)
 	cc[N] = NTEST8(A_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Sta_E(void)
@@ -5326,7 +5327,7 @@ void Sta_E(void)
 	cc[N] = NTEST8(A_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Eora_E(void)
@@ -5336,7 +5337,7 @@ void Eora_E(void)
 	cc[Z] = ZTEST(A_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Adca_E(void)
@@ -5350,7 +5351,7 @@ void Adca_E(void)
 	cc[N] = NTEST8(A_REG);
 	cc[Z] = ZTEST(A_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Ora_E(void)
@@ -5360,7 +5361,7 @@ void Ora_E(void)
 	cc[Z] = ZTEST(A_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Adda_E(void)
@@ -5374,7 +5375,7 @@ void Adda_E(void)
 	cc[N] = NTEST8(A_REG);
 	cc[Z] = ZTEST(A_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Cmpx_E(void)
@@ -5386,7 +5387,7 @@ void Cmpx_E(void)
 	cc[N] = NTEST16(temp16);
 	cc[Z] = ZTEST(temp16);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M75];
+	CycleCounter+=NatEmuCycles75;
 }
 
 void Bsr_E(void)
@@ -5397,7 +5398,7 @@ void Bsr_E(void)
 	MemWrite8(pc.B.lsb,S_REG--);
 	MemWrite8(pc.B.msb,S_REG);
 	PC_REG=postword;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M87];
+	CycleCounter+=NatEmuCycles87;
 }
 
 void Ldx_E(void)
@@ -5407,7 +5408,7 @@ void Ldx_E(void)
 	cc[N] = NTEST16(X_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Stx_E(void)
@@ -5417,7 +5418,7 @@ void Stx_E(void)
 	cc[N] = NTEST16(X_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Subb_M(void)
@@ -5465,7 +5466,7 @@ void Addd_M(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Andb_M(void)
@@ -5578,7 +5579,7 @@ void Subb_D(void)
 	B_REG = (unsigned char)temp16;
 	cc[Z] = ZTEST(B_REG);
 	cc[N] = NTEST8(B_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Cmpb_D(void)
@@ -5589,7 +5590,7 @@ void Cmpb_D(void)
 	cc[V] = OVERFLOW8(cc[C],postbyte,temp8,B_REG);
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Sbcb_D(void)
@@ -5601,7 +5602,7 @@ void Sbcb_D(void)
 	B_REG = (unsigned char)temp16;
 	cc[N] = NTEST8(B_REG);
 	cc[Z] = ZTEST(B_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Addd_D(void)
@@ -5613,7 +5614,7 @@ void Addd_D(void)
 	D_REG= temp32;
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M64];
+	CycleCounter+=NatEmuCycles64;
 }
 
 void Andb_D(void)
@@ -5622,7 +5623,7 @@ void Andb_D(void)
 	cc[N] =NTEST8(B_REG);
 	cc[Z] =ZTEST(B_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Bitb_D(void)
@@ -5631,7 +5632,7 @@ void Bitb_D(void)
 	cc[N] = NTEST8(temp8);
 	cc[Z] =ZTEST(temp8);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Ldb_D(void)
@@ -5640,7 +5641,7 @@ void Ldb_D(void)
 	cc[Z] = ZTEST(B_REG);
 	cc[N] = NTEST8(B_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Stb_D(void)
@@ -5649,7 +5650,7 @@ void Stb_D(void)
 	cc[Z] = ZTEST(B_REG);
 	cc[N] = NTEST8(B_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Eorb_D(void)
@@ -5658,7 +5659,7 @@ void Eorb_D(void)
 	cc[N] = NTEST8(B_REG);
 	cc[Z] = ZTEST(B_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Adcb_D(void)
@@ -5671,7 +5672,7 @@ void Adcb_D(void)
 	B_REG = (unsigned char)temp16;
 	cc[N] = NTEST8(B_REG);
 	cc[Z] = ZTEST(B_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Orb_D(void)
@@ -5680,7 +5681,7 @@ void Orb_D(void)
 	cc[N] = NTEST8(B_REG);
 	cc[Z] = ZTEST(B_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Addb_D(void)
@@ -5693,7 +5694,7 @@ void Addb_D(void)
 	B_REG = (unsigned char)temp16;
 	cc[N] = NTEST8(B_REG);
 	cc[Z] = ZTEST(B_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M43];
+	CycleCounter+=NatEmuCycles43;
 }
 
 void Ldd_D(void)
@@ -5702,7 +5703,7 @@ void Ldd_D(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Std_D(void)
@@ -5711,7 +5712,7 @@ void Std_D(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Ldu_D(void)
@@ -5720,7 +5721,7 @@ void Ldu_D(void)
 	cc[Z] = ZTEST(U_REG);
 	cc[N] = NTEST16(U_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Stu_D(void)
@@ -5729,7 +5730,7 @@ void Stu_D(void)
 	cc[Z] = ZTEST(U_REG);
 	cc[N] = NTEST16(U_REG);
 	cc[V] = 0;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Subb_X(void)
@@ -5776,7 +5777,7 @@ void Addd_X(void)
 	D_REG= temp32;
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Andb_X(void)
@@ -5905,7 +5906,7 @@ void Subb_E(void)
 	cc[Z] = ZTEST(B_REG);
 	cc[N] = NTEST8(B_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Cmpb_E(void)
@@ -5917,7 +5918,7 @@ void Cmpb_E(void)
 	cc[N] = NTEST8(temp8);
 	cc[Z] = ZTEST(temp8);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Sbcb_E(void)
@@ -5930,7 +5931,7 @@ void Sbcb_E(void)
 	cc[N] = NTEST8(B_REG);
 	cc[Z] = ZTEST(B_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Addd_E(void)
@@ -5943,7 +5944,7 @@ void Addd_E(void)
 	cc[Z] = ZTEST(D_REG);
 	cc[N] = NTEST16(D_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M76];
+	CycleCounter+=NatEmuCycles76;
 }
 
 void Andb_E(void)
@@ -5953,7 +5954,7 @@ void Andb_E(void)
 	cc[Z] = ZTEST(B_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Bitb_E(void)
@@ -5963,7 +5964,7 @@ void Bitb_E(void)
 	cc[Z] = ZTEST(temp8);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Ldb_E(void)
@@ -5973,7 +5974,7 @@ void Ldb_E(void)
 	cc[N] = NTEST8(B_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Stb_E(void)
@@ -5983,7 +5984,7 @@ void Stb_E(void)
 	cc[N] = NTEST8(B_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Eorb_E(void)
@@ -5993,7 +5994,7 @@ void Eorb_E(void)
 	cc[Z] = ZTEST(B_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Adcb_E(void)
@@ -6007,7 +6008,7 @@ void Adcb_E(void)
 	cc[N] = NTEST8(B_REG);
 	cc[Z] = ZTEST(B_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Orb_E(void)
@@ -6017,7 +6018,7 @@ void Orb_E(void)
 	cc[Z] = ZTEST(B_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Addb_E(void)
@@ -6031,7 +6032,7 @@ void Addb_E(void)
 	cc[N] = NTEST8(B_REG);
 	cc[Z] =ZTEST(B_REG);
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M54];
+	CycleCounter+=NatEmuCycles54;
 }
 
 void Ldd_E(void)
@@ -6041,7 +6042,7 @@ void Ldd_E(void)
 	cc[N] = NTEST16(D_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Std_E(void)
@@ -6051,7 +6052,7 @@ void Std_E(void)
 	cc[N] = NTEST16(D_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Ldu_E(void)
@@ -6061,7 +6062,7 @@ void Ldu_E(void)
 	cc[N] = NTEST16(U_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void Stu_E(void)
@@ -6071,7 +6072,7 @@ void Stu_E(void)
 	cc[N] = NTEST16(U_REG);
 	cc[V] = 0;
 	PC_REG+=2;
-	CycleCounter+=InsCycles[md[NATIVE6309]][M65];
+	CycleCounter+=NatEmuCycles65;
 }
 
 void(*JmpVec1[256])(void) = {
@@ -6851,6 +6852,11 @@ void(*JmpVec3[256])(void) = {
 	InvalidInsHandler,		// FF
 };
 
+// static unsigned char op1, op2;
+// static unsigned short opstack[16];
+// static unsigned short addrstack[16];
+// static short int stckidx = 0;
+
 int HD6309Exec(int CycleFor)
 {
 
@@ -6877,7 +6883,7 @@ int HD6309Exec(int CycleFor)
 		}
 
 		if (SyncWaiting == 1)	//Abort the run nothing happens asyncronously from the CPU
-			break; //return(0); // WDZ - Experimental SyncWaiting should still return used cycles (and not zero) by breaking from loop
+			return(0); // WDZ - Experimental SyncWaiting should still return used cycles (and not zero) by breaking from loop
 
 		JmpVec1[MemRead8(PC_REG++)](); // Execute instruction pointed to by PC_REG
 	}//End While
@@ -7000,7 +7006,6 @@ void cpu_nmi(void)
 	return;
 }
 
-
 static unsigned short CalculateEA(unsigned char postbyte)
 {
 	static unsigned short int ea = 0;
@@ -7013,105 +7018,105 @@ static unsigned short CalculateEA(unsigned char postbyte)
 	{
 		switch (postbyte & 0x1F)
 		{
-		case 0:
+		case 0: // Post inc by 1
 			ea = (*xfreg16[Register]);
 			(*xfreg16[Register])++;
-			CycleCounter += 2;
+			CycleCounter += NatEmuCycles21;
 			break;
 
-		case 1:
+		case 1: // post in by 2
 			ea = (*xfreg16[Register]);
 			(*xfreg16[Register]) += 2;
-			CycleCounter += 3;
+			CycleCounter += NatEmuCycles32;
 			break;
 
-		case 2:
+		case 2: // pre dec by 1
 			(*xfreg16[Register]) -= 1;
 			ea = (*xfreg16[Register]);
-			CycleCounter += 2;
+			CycleCounter += NatEmuCycles21;
 			break;
 
-		case 3:
+		case 3: // pre dec by 2
 			(*xfreg16[Register]) -= 2;
 			ea = (*xfreg16[Register]);
-			CycleCounter += 3;
+			CycleCounter += NatEmuCycles32;
 			break;
 
-		case 4:
+		case 4: // no offset
 			ea = (*xfreg16[Register]);
 			break;
 
-		case 5:
+		case 5: // B reg offset
 			ea = (*xfreg16[Register]) + ((signed char)B_REG);
 			CycleCounter += 1;
 			break;
 
-		case 6:
+		case 6: // A reg offset
 			ea = (*xfreg16[Register]) + ((signed char)A_REG);
 			CycleCounter += 1;
 			break;
 
-		case 7:
+		case 7: // E reg offset 
 			ea = (*xfreg16[Register]) + ((signed char)E_REG);
 			CycleCounter += 1;
 			break;
 
-		case 8:
+		case 8: // 8 bit offset
 			ea = (*xfreg16[Register]) + (signed char)MemRead8(PC_REG++);
 			CycleCounter += 1;
 			break;
 
-		case 9:
+		case 9: // 16 bit offset
 			ea = (*xfreg16[Register]) + IMMADDRESS(PC_REG);
-			CycleCounter += 4;
+			CycleCounter += NatEmuCycles43;
 			PC_REG += 2;
 			break;
 
-		case 10:
+		case 10: // F reg offset
 			ea = (*xfreg16[Register]) + ((signed char)F_REG);
 			CycleCounter += 1;
 			break;
 
-		case 11:
+		case 11: // D reg offset 
 			ea = (*xfreg16[Register]) + D_REG; //Changed to unsigned 03/14/2005 NG Was signed
-			CycleCounter += 4;
+			CycleCounter += NatEmuCycles42;
 			break;
 
-		case 12:
+		case 12: // 8 bit PC relative
 			ea = (signed short)PC_REG + (signed char)MemRead8(PC_REG) + 1;
 			CycleCounter += 1;
 			PC_REG++;
 			break;
 
-		case 13: //MM
+		case 13: // 16 bit PC relative
 			ea = PC_REG + IMMADDRESS(PC_REG) + 2;
-			CycleCounter += 5;
+			CycleCounter += NatEmuCycles53;
 			PC_REG += 2;
 			break;
 
-		case 14:
+		case 14: // W reg offset
 			ea = (*xfreg16[Register]) + W_REG;
 			CycleCounter += 4;
 			break;
 
-		case 15: //01111
+		case 15: // W reg
 			byte = (postbyte >> 5) & 3;
 			switch (byte)
 			{
-			case 0:
+			case 0: // No offset from W reg
 				ea = W_REG;
 				break;
-			case 1:
+			case 1: // 16 bit offset from W reg
 				ea = W_REG + IMMADDRESS(PC_REG);
 				PC_REG += 2;
 				CycleCounter += 2;
 				break;
-			case 2:
+			case 2: // Post inc by 2 from W reg
 				ea = W_REG;
 				W_REG += 2;
 				CycleCounter += 1;
 				break;
-			case 3:
+			case 3: // Pre dec by 2 from W reg
 				W_REG -= 2;
 				ea = W_REG;
 				CycleCounter += 1;
@@ -7119,25 +7124,25 @@ static unsigned short CalculateEA(unsigned char postbyte)
 			}
 			break;
 
-		case 16: //10000
+		case 16: // W reg
 			byte = (postbyte >> 5) & 3;
 			switch (byte)
 			{
-			case 0:
+			case 0: // Indirect no offset from W reg
 				ea = MemRead16(W_REG);
 				CycleCounter += 3;
 				break;
-			case 1:
+			case 1: // Indirect 16 bit offset from W reg
 				ea = MemRead16(W_REG + IMMADDRESS(PC_REG));
 				PC_REG += 2;
 				CycleCounter += 5;
 				break;
-			case 2:
+			case 2: // Indirect post inc by 2 from W reg
 				ea = MemRead16(W_REG);
 				W_REG += 2;
 				CycleCounter += 4;
 				break;
-			case 3:
+			case 3: // Indirect pre dec by 2 from W reg
 				W_REG -= 2;
 				ea = MemRead16(W_REG);
 				CycleCounter += 4;
@@ -7145,94 +7150,94 @@ static unsigned short CalculateEA(unsigned char postbyte)
 			}
 			break;
 
-
-		case 17: //10001
+		case 17: // Indirect post inc by 2 
 			ea = (*xfreg16[Register]);
 			(*xfreg16[Register]) += 2;
 			ea = MemRead16(ea);
 			CycleCounter += 6;
 			break;
 
-		case 18: //10010
+		case 18: // possibly illegal instruction
 			CycleCounter += 6;
 			break;
 
-		case 19: //10011
+		case 19: // Indirect pre dec by 2
 			(*xfreg16[Register]) -= 2;
 			ea = (*xfreg16[Register]);
 			ea = MemRead16(ea);
 			CycleCounter += 6;
 			break;
 
-		case 20: //10100
+		case 20: // Indirect no offset 
 			ea = (*xfreg16[Register]);
 			ea = MemRead16(ea);
 			CycleCounter += 3;
 			break;
 
-		case 21: //10101
+		case 21: // Indirect B reg offset
 			ea = (*xfreg16[Register]) + ((signed char)B_REG);
 			ea = MemRead16(ea);
 			CycleCounter += 4;
 			break;
 
-		case 22: //10110
+		case 22: // indirect A reg offset
 			ea = (*xfreg16[Register]) + ((signed char)A_REG);
 			ea = MemRead16(ea);
 			CycleCounter += 4;
 			break;
 
-		case 23: //10111
+		case 23: // indirect E reg offset
 			ea = (*xfreg16[Register]) + ((signed char)E_REG);
 			ea = MemRead16(ea);
 			CycleCounter += 4;
 			break;
 
-		case 24: //11000
+		case 24: // indirect 8 bit offset
 			ea = (*xfreg16[Register]) + (signed char)MemRead8(PC_REG++);
 			ea = MemRead16(ea);
 			CycleCounter += 4;
 			break;
 
-		case 25: //11001
+		case 25: // indirect 16 bit offset
 			ea = (*xfreg16[Register]) + IMMADDRESS(PC_REG);
 			ea = MemRead16(ea);
 			CycleCounter += 7;
 			PC_REG += 2;
 			break;
-		case 26: //11010
+
+		case 26: // indirect F reg offset
 			ea = (*xfreg16[Register]) + ((signed char)F_REG);
 			ea = MemRead16(ea);
 			CycleCounter += 4;
 			break;
 
-		case 27: //11011
+		case 27: // indirect D reg offset
 			ea = (*xfreg16[Register]) + D_REG;
 			ea = MemRead16(ea);
 			CycleCounter += 7;
 			break;
 
-		case 28: //11100
+		case 28: // indirect 8 bit PC relative
 			ea = (signed short)PC_REG + (signed char)MemRead8(PC_REG) + 1;
 			ea = MemRead16(ea);
 			CycleCounter += 4;
 			PC_REG++;
 			break;
 
-		case 29: //11101
+		case 29: //indirect 16 bit PC relative
 			ea = PC_REG + IMMADDRESS(PC_REG) + 2;
 			ea = MemRead16(ea);
 			CycleCounter += 8;
 			PC_REG += 2;
 			break;
 
-		case 30: //11110
+		case 30: // indirect W reg offset
 			ea = (*xfreg16[Register]) + W_REG;
 			ea = MemRead16(ea);
 			CycleCounter += 7;
 			break;
 
-		case 31: //11111
+		case 31: // extended indirect
 			ea = IMMADDRESS(PC_REG);
 			ea = MemRead16(ea);
 			CycleCounter += 8;
@@ -7241,7 +7246,7 @@ static unsigned short CalculateEA(unsigned char postbyte)
 
 		} //END Switch
 	}
-	else
+	else // 5 bit offset
 	{
 		byte = (postbyte & 31);
 		byte = (byte << 3);
@@ -7252,12 +7257,10 @@ static unsigned short CalculateEA(unsigned char postbyte)
 	return(ea);
 }
 
-
-
-
 void setcc (unsigned char bincc)
 {
 	unsigned char bit;
+	ccbits = bincc;
 	for (bit=0;bit<=7;bit++)
 		cc[bit]=!!(bincc & (1<<bit));
 	return;
@@ -7277,7 +7280,18 @@ void setmd (unsigned char binmd)
 	unsigned char bit;
 	for (bit=0;bit<=1;bit++)
 		md[bit]=!!(binmd & (1<<bit));
-	if (md[NATIVE6309]) SetNatEmuStat(2); else SetNatEmuStat(1);
+	if (md[NATIVE6309]) 
+	{
+		SetNatEmuStat(2);
+	}
+	else 
+	{
+		SetNatEmuStat(1);
+	}
+	for(short i = 0 ; i < 24 ; i++)
+	{
+		*NatEmuCycles[i] = InsCycles[md[NATIVE6309]][i];
+	}
 	return;
 }
 
@@ -7290,10 +7304,6 @@ unsigned char getmd(void)
 		return(binmd);
 }
 	
-
-
-
-
 void HD6309AssertInterupt(unsigned char Interupt,unsigned char waiter)// 4 nmi 2 firq 1 irq
 {
 	SyncWaiting=0;
@@ -7311,6 +7321,14 @@ void HD6309DeAssertInterupt(unsigned char Interupt)// 4 nmi 2 firq 1 irq
 
 void InvalidInsHandler(void)
 {	
+	// fprintf(stderr, "Illegal instruction %02x %02x \n", (int)op1, (int)op2);
+	// extern void dumpMem(UINT16, UINT16);
+	// dumpMem(PC_REG-8, (UINT16)16);
+	// for(short i = 0 ; i > -16 ; i--)
+	// {
+	// 	fprintf(stderr, "(%04x %04x)", addrstack[stckidx+i], opstack[stckidx+i]);
+	// }
+	// fprintf(stderr, "\n");
 	md[ILLEGAL]=1;
 	mdbits=getmd();
 	ErrorVector();
@@ -7347,7 +7365,7 @@ void ErrorVector(void)
 	MemWrite8(A_REG,--S_REG);
 	MemWrite8(getcc(),--S_REG);
 	PC_REG=MemRead16(VTRAP);
-	CycleCounter+=(12 + InsCycles[md[NATIVE6309]][M54]);	//One for each byte +overhead? Guessing from PSHS
+	CycleCounter+=(12 + NatEmuCycles54);	//One for each byte +overhead? Guessing from PSHS
 	return;
 }
 

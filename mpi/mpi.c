@@ -37,6 +37,9 @@ static unsigned char (*MemRead8)(unsigned short)=NULL;
 static void (*MemWrite8)(unsigned char,unsigned short)=NULL;
 static unsigned char (*MmuRead8)(unsigned char,unsigned short)=NULL;
 static void (*MmuWrite8)(unsigned char,unsigned char,unsigned short)=NULL;
+//static void (*PakRomShareCall)(MMUROMSHARE)=NULL;
+static void (*PakRomShareCall)(short, unsigned char *)=NULL;
+static unsigned char *PakRomAddr=NULL;
 
 static void (*PakSetCart)(unsigned char)=NULL;
 static char ModuleNames[MAXPAX][MAX_LOADSTRING]={"Empty","Empty","Empty","Empty"};	
@@ -45,6 +48,7 @@ static char SlotLabel[MAXPAX][MAX_LOADSTRING*2]={"Empty","Empty","Empty","Empty"
 //static 
 static char ModulePaths[MAXPAX][MAX_PATH]={"","","",""};
 static unsigned char *ExtRomPointers[MAXPAX]={NULL,NULL,NULL,NULL};
+static unsigned short ExtRomSizes[MAXPAX]={0,0,0,0};
 static unsigned int BankedCartOffset[MAXPAX]={0,0,0,0};
 static unsigned char Temp,Temp2;
 static char IniFile[MAX_PATH]="";
@@ -66,7 +70,7 @@ static void (*ModuleResetCalls[MAXPAX]) (void)={NULL,NULL,NULL,NULL};
 static void (*SetInteruptCallPointerCalls[MAXPAX]) ( ASSERTINTERUPT)={NULL,NULL,NULL,NULL};
 static void (*DmaMemPointerCalls[MAXPAX]) (MEMREAD8,MEMWRITE8)={NULL,NULL,NULL,NULL};
 static void (*MmuMemPointerCalls[MAXPAX]) (MMUREAD8,MMUWRITE8)={NULL,NULL,NULL,NULL};
-
+static void (*PakRomShareCalls[MAXPAX]) (unsigned char *)={NULL,NULL,NULL,NULL};
 
 void SetCartSlot0(unsigned char);
 void SetCartSlot1(unsigned char);
@@ -96,6 +100,7 @@ int FileID(char *);
 void UpdateMenu(unsigned char);
 void BuildMenu(void);
 void UpdateConfig(unsigned char);
+static void RetriggerModuleShare(void);
 
 AG_MenuItem *menuAnchor = NULL;
 AG_MenuItem *itemMenu[MAXPAX] = { NULL,NULL,NULL,NULL };
@@ -177,8 +182,6 @@ void ADDCALL ModuleConfig(unsigned char func)
 			}
 		}
 
-	break;
-
 	default:
 		break;
 	}
@@ -210,16 +213,9 @@ void ADDCALL PackPortWrite(unsigned char Port,unsigned char Data)
 			PakSetCart(1);
 		return;
 	}
-//		if ( (Port>=0x40) & (Port<=0x5F))
-//		{
-//			BankedCartOffset[SpareSelectSlot]=(Data & 15)<<14;
-//			if ( PakPortWriteCalls[SpareSelectSlot] != NULL)
-//				PakPortWriteCalls[SpareSelectSlot](Port,Data);
-//		}
-//		else
-		for(unsigned char Temp=0;Temp<4;Temp++)
-			if (PakPortWriteCalls[Temp] != NULL)
-				PakPortWriteCalls[Temp](Port,Data);
+	for(unsigned char Temp=0;Temp<4;Temp++)
+		if (PakPortWriteCalls[Temp] != NULL)
+			PakPortWriteCalls[Temp](Port,Data);
 	return;
 }
 
@@ -232,13 +228,6 @@ unsigned char ADDCALL PackPortRead(unsigned char Port)
 		return(SlotRegister);
 	}
 
-//		if ( (Port>=0x40) & (Port<=0x5F))
-//		{
-//			if ( PakPortReadCalls[SpareSelectSlot] != NULL)
-//				return(PakPortReadCalls[SpareSelectSlot](Port));
-//			else
-//				return(NULL);
-//		}
 	Temp2=0;
 	for (Temp=0;Temp<4;Temp++)
 	{
@@ -268,7 +257,7 @@ void ADDCALL MmuPointers(MMUREAD8 Temp1,MMUWRITE8 Temp2)
 	return;
 }
 
-//This captures the pointers to the MemRead8 and MemWrite8 functions. This allows the DLL to do DMA xfers with CPU ram.
+//This captures the pointers to the MemRead8 and MemWrite8 functions.
 void ADDCALL MemPointers(MEMREAD8 Temp1,MEMWRITE8 Temp2)
 {
 	MemRead8=Temp1;
@@ -279,7 +268,7 @@ void ADDCALL MemPointers(MEMREAD8 Temp1,MEMWRITE8 Temp2)
 unsigned char ADDCALL PakMemRead8(unsigned short Address)
 {
 	if (ExtRomPointers[ChipSelectSlot] != NULL)
-		return(ExtRomPointers[ChipSelectSlot][(Address & 32767)+BankedCartOffset[ChipSelectSlot]]); //Bank Select ???
+		return(ExtRomPointers[ChipSelectSlot][(Address & 32767)/*+BankedCartOffset[ChipSelectSlot]*/]); //Bank Select ???
 	if (PakMemRead8Calls[ChipSelectSlot] != NULL)
 		return(PakMemRead8Calls[ChipSelectSlot](Address));
 	return(NULL);
@@ -325,15 +314,38 @@ unsigned char ADDCALL ModuleReset(void)
 	{
 		BankedCartOffset[Temp]=0; //Do I need to keep independant selects?
 		
+		if (SetInteruptCallPointerCalls[Temp] !=NULL)
+			SetInteruptCallPointerCalls[Temp](AssertInt);
+
+		if (DmaMemPointerCalls[Temp] !=NULL)
+			DmaMemPointerCalls[Temp](MemRead8,MemWrite8);
+
+		if (MmuMemPointerCalls[Temp] !=NULL)
+			MmuMemPointerCalls[Temp](MmuRead8,MmuWrite8);
+
+		if (Temp == ChipSelectSlot)
+			if (PakRomShareCalls[Temp] != NULL)
+				PakRomShareCalls[Temp](PakRomAddr);
+		
+		//PakRomShareCalls[Temp] = NULL;
+
 		if (ModuleResetCalls[Temp] !=NULL)
 			ModuleResetCalls[Temp]();
 
-		ModuleResetCalls[Temp] = NULL;
+		//ModuleResetCalls[Temp] = NULL;
+
+		if (PakRomAddr != NULL && ExtRomPointers[Temp] != NULL && ExtRomSizes[Temp] != 0)
+			memcpy(PakRomAddr, ExtRomPointers[Temp], ExtRomSizes[Temp]);
 	}
 	PakSetCart(0);
 	if (CartForSlot[SpareSelectSlot]==1)
 		PakSetCart(1);
 	return(NULL);
+}
+
+void ADDCALL PakRomShare(unsigned char *pakromaddr)
+{
+	PakRomAddr = pakromaddr;
 }
 
 //void ADDCALL SetIniPath(char *IniFilePath)
@@ -463,7 +475,7 @@ unsigned char MountModule(unsigned char Slot,char *ModName)
 
 	case 2: //ROM image
 		UnloadModule(Slot);
-		ExtRomPointers[Slot]=(unsigned char *)malloc(0x40000);
+		ExtRomPointers[Slot]=(unsigned char *)malloc(0x4000);
 		if (ExtRomPointers[Slot]==NULL)
 		{
 			AG_TextMsg(AG_MSG_INFO, "Rom pointer is NULL");
@@ -475,8 +487,9 @@ unsigned char MountModule(unsigned char Slot,char *ModName)
 			AG_TextMsg(AG_MSG_INFO, "File handle is NULL");
 			return(0);
 		}
-		while ((feof(rom_handle)==0) & (index<0x40000))
+		while ((index<0x4000) && (feof(rom_handle)==0))
 			ExtRomPointers[Slot][index++]=fgetc(rom_handle);
+		ExtRomSizes[Slot] = --index;
 		fclose(rom_handle);
 		strcpy(ModulePaths[Slot],ModuleName);
 		PathStripPath(ModuleName);
@@ -505,6 +518,7 @@ unsigned char MountModule(unsigned char Slot,char *ModName)
 
 		DmaMemPointerCalls[Slot]=(DMAMEMPOINTERS) SDL_LoadFunction(hinstLib[Slot], "MemPointers");
 		MmuMemPointerCalls[Slot]=(MMUMEMPOINTERS) SDL_LoadFunction(hinstLib[Slot], "MmuPointers");
+		PakRomShareCalls[Slot]=(MMUROMSHARE) SDL_LoadFunction(hinstLib[Slot], "PakRomShare");
 		SetCartCalls[Slot]=(SETCARTPOINTER) SDL_LoadFunction(hinstLib[Slot], "SetCart"); //HERE
 		
 		HeartBeatCalls[Slot]=(HEARTBEAT) SDL_LoadFunction(hinstLib[Slot], "HeartBeat");
@@ -528,12 +542,6 @@ unsigned char MountModule(unsigned char Slot,char *ModName)
 		UpdateMenu(Slot);
 		UpdateConfig(Slot);
 
-		if (SetInteruptCallPointerCalls[Slot] !=NULL)
-			SetInteruptCallPointerCalls[Slot](AssertInt);
-		if (DmaMemPointerCalls[Slot] !=NULL)
-			DmaMemPointerCalls[Slot](MemRead8,MemWrite8);
-		if (MmuMemPointerCalls[Slot] !=NULL)
-			MmuMemPointerCalls[Slot](MmuRead8,MmuWrite8);
 		if (SetIniPathCalls[Slot] != NULL)
 		{
 			//SetIniPathCalls[Slot](IniFile);
@@ -586,6 +594,21 @@ void UnloadModule(unsigned char Slot)
 	return;
 }
 
+static void RetriggerModuleShare(void)
+{
+	//fprintf(stderr, "MPI RetriggerModuleShare %d\n", (int)ChipSelectSlot);
+	if (ConfigModuleCalls[ChipSelectSlot] != NULL)
+	{
+		//fprintf(stderr, "MPI triggering PakRomShare call back with PAK\n");
+		ConfigModuleCalls[ChipSelectSlot](2); // Trigger Mmu ROM share
+	}
+	if (ExtRomPointers[ChipSelectSlot] != NULL) 
+	{
+		//fprintf(stderr, "MPI calling PakRomShare call back with ROM\n");
+		PakRomShareCall((unsigned short) ExtRomSizes[ChipSelectSlot], ExtRomPointers[ChipSelectSlot]);
+	}
+}
+
 void LoadConfig(void)
 {
 	char ModName[MAX_LOADSTRING]="";
@@ -606,6 +629,7 @@ void LoadConfig(void)
 	for (Temp=0;Temp<4;Temp++)
 		if (strlen(ModulePaths[Temp]) !=0)
 			MountModule(Temp, ModulePaths[Temp]);
+	//RetriggerModuleShare();
 	return;
 }
 
