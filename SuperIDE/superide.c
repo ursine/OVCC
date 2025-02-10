@@ -161,10 +161,24 @@ void ADDCALL ModuleConfig(unsigned char func)
 	switch (func)
 	{
 	case 0: // Destroy Menus
-		AG_MenuDel(itemMaster);
-		AG_MenuDel(itemSlave);
-		AG_MenuDel(itemConfig);
-		AG_MenuDel(itemSeperator);
+		if (itemMasterEject)
+			AG_MenuDel(itemMasterEject);
+		itemMasterEject = NULL;
+		if (itemMaster)
+			AG_MenuDel(itemMaster);
+		itemMaster = NULL;
+		if (itemSlaveEject)
+			AG_MenuDel(itemSlaveEject);
+		itemSlaveEject = NULL;
+		if (itemSlave)
+			AG_MenuDel(itemSlave);
+		itemSlave = NULL;
+		if (itemConfig)
+			AG_MenuDel(itemConfig);
+		itemConfig = NULL;
+		if (itemSeperator)
+			AG_MenuDel(itemSeperator);
+		itemSeperator = NULL;
 		break;
 
 	case 1: // Update ini file
@@ -207,7 +221,7 @@ void UpdateMenu(int disk)
 	}
 }
 
-int LoadHardDisk(AG_Event *event)
+void LoadHardDisk(AG_Event *event)
 {
 	int disk = AG_INT(1);
 	char *file = AG_STRING(2);
@@ -228,7 +242,7 @@ void BrowseHardDisk(AG_Event *event)
 {
 	int disk = AG_INT(1);
 	
-    AG_Window *fdw = AG_WindowNew(AG_WINDOW_DIALOG);
+    AG_Window *fdw = AG_WindowNew(0);
     AG_WindowSetCaption(fdw, "Insert FD Image");
     AG_WindowSetGeometryAligned(fdw, AG_WINDOW_ALIGNMENT_NONE, 500, 500);
     AG_WindowSetCloseAction(fdw, AG_WINDOW_DETACH);
@@ -262,7 +276,7 @@ void BaseComboSelected(AG_Event *event)
 {
     AG_TlistItem *ti = AG_PTR(1);
 
-    BaseAddr = ti->label;
+    BaseAddr = ti->v ; // ti->label;
 
 	if (BaseAddr == 3)
 	{
@@ -277,10 +291,12 @@ void BaseComboSelected(AG_Event *event)
 
 void PopulateBaseAddresses(AG_Tlist *list)
 {
-    AG_TlistAddS(list, NULL, "40");
-    AG_TlistAddS(list, NULL, "50");
-    AG_TlistAddS(list, NULL, "60");
-    AG_TlistAddS(list, NULL, "70");
+	AG_TlistItem *listItem;
+
+    listItem = AG_TlistAddS(list, NULL, "40"); listItem->v = 0;
+    listItem = AG_TlistAddS(list, NULL, "50"); listItem->v = 1;
+    listItem = AG_TlistAddS(list, NULL, "60"); listItem->v = 2;
+    listItem = AG_TlistAddS(list, NULL, "70"); listItem->v = 3;
 }
 
 void ConfigIDE(AG_Event *event)
@@ -350,8 +366,9 @@ void BuildMenu(void)
             itemSlaveEject = AG_MenuAction(itemSlave, "Eject : ", NULL, UnloadHardDisk, "%i", 1);
 		}
 
-		itemConfig = AG_MenuNode(menuAnchor, "IDE Config", NULL);
-		AG_MenuAction(itemConfig, "Config", NULL, ConfigIDE, NULL);
+		// itemConfig = AG_MenuNode(menuAnchor, "IDE Config", NULL);
+		// AG_MenuAction(itemConfig, "Config", NULL, ConfigIDE, NULL);
+		itemConfig = AG_MenuAction(menuAnchor, "IDE Config", NULL, ConfigIDE, NULL);
 	}
 }
 

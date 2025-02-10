@@ -26,7 +26,7 @@ This file is part of OVCC (Open Virtual Color Computer).
 #include "tcc1014mmu.h"
 #include "iobus.h"
 #include "config.h"
-#include "tcc1014graphicsSDL.h"
+#include "tcc1014graphicsAGAR.h"
 #include "pakinterface.h"
 #include "logger.h"
 #include "hd6309.h"
@@ -40,6 +40,7 @@ static PUINT8 MemPages[1024];
 static PUINT8 memory=NULL;				//Emulated RAM FULL 128-8096K
 static PUINT8 taskmemory=NULL;			//Emulated RAM 64k
 static PUINT8 vectormemory=NULL;		//Emulated RAM 64k
+static PUINT8 taskvectormemory=NULL;	//Emulated RAM 64k
 static PUINT8 InternalRomBuffer=NULL;   //Emulated Internal ROM 32k
 static UINT8  MmuTask=0;				// $FF91 bit 0
 static UINT8  MmuEnabled=0;				// $FF90 bit 6
@@ -112,7 +113,7 @@ static PUINT8 MmuInit_hw(UINT8  RamConfig)
 		return(NULL);
 
 	taskmemory = ptrCoCoTask0Mem; // default to first task 0
-	SetVidMaskSDL(VidMask[CurrentRamConfig]);
+	SetVidMaskAGAR(VidMask[CurrentRamConfig]);
 
 	InternalRomBuffer = Create32KROMMemory();
 	if (InternalRomBuffer == NULL)
@@ -131,6 +132,7 @@ static void MmuReset_hw(void)
 	MmuTask=0;
 	MmuEnabled=0;
 	RamVectors=0;
+	taskvectormemory = taskmemory;
 	MmuState=0;
 	RomMap=0;
 	MapType=0;
@@ -368,6 +370,14 @@ static PUINT8 Create64KVirtualMemory(UINT32 ramsize)
 void SetVectors_hw(UINT8  data)
 {
 	RamVectors=!!data; //Bit 3 of $FF90 MC3
+	if (RamVectors)
+	{
+		taskvectormemory = vectormemory;
+	}
+	else
+	{
+		taskvectormemory = taskmemory;
+	}
 }
 
 void SetMmuRegister_hw(UINT8  Register,UINT8  data)
@@ -469,7 +479,7 @@ void MmuWrite8_hw(UINT8  data, UINT8  bank, UINT16 address)
 
 // Coco3 MMU Code
 
-UINT8  MemRead8_hw(UINT16 address)
+UINT8  MemRead8_hw_orig(UINT16 address)
 {
 	if (address<0xFE00)
 	{
@@ -482,7 +492,35 @@ UINT8  MemRead8_hw(UINT16 address)
 	return(taskmemory[address]);
 }	
 
-void MemWrite8_hw(UINT8  data, UINT16 address)
+UINT8  MemRead8_hw(UINT16 address)
+{
+	if (address<0xFE00)
+	{
+		return(taskmemory[address]);
+	}
+	if (address>0xFEFF)
+	{
+		return (port_read(address));
+	}
+	return(taskvectormemory[address]);
+}	
+
+UINT8  MemRead8_hw_new(UINT16 address) // oddly not as effecient as using ifs
+{
+	switch(address)
+	{
+		case 0x0000 ... 0xFDFF:
+			return(taskmemory[address]);
+
+		case 0xFE00 ... 0xFEFF:
+			return(taskvectormemory[address]);
+
+		default:
+			return (port_read(address));
+	}
+}	
+
+void MemWrite8_hw_orig(UINT8  data, UINT16 address)
 {
 	if (address < 0xFE00)
 	{
@@ -500,6 +538,39 @@ void MemWrite8_hw(UINT8  data, UINT16 address)
 		taskmemory[address] = data;
 }
 
+void MemWrite8_hw(UINT8  data, UINT16 address)
+{
+	if (address < 0xFE00)
+	{
+		taskmemory[address] = data;
+		return;
+	}
+	if (address > 0xFEFF)
+	{
+		port_write(data, address);
+		return;
+	}
+	taskvectormemory[address] = data;
+}
+
+void MemWrite8_hw_new(UINT8  data, UINT16 address) // oddly not as effecient as using ifs
+{
+	switch (address)
+	{
+		case 0x0000 ... 0xFDFF:
+			taskmemory[address] = data;
+			return;
+
+		case 0xFE00 ... 0xFEFF:
+			taskvectormemory[address] = data;
+			return;
+
+		default:
+			port_write(data, address);
+			return;
+	}
+}
+
 void SetDistoRamBank_hw(UINT8  data)
 {
 
@@ -512,12 +583,12 @@ void SetDistoRamBank_hw(UINT8  data)
 		return;
 		break;
 	case 2:	//2048K
-		SetVideoBankSDL(data & 3);
+		SetVideoBankAGAR(data & 3);
 		SetMmuPrefix(0);
 		return;
 		break;
 	case 3:	//8192K	//No Can 3 
-		SetVideoBankSDL(data & 0x0F);
+		SetVideoBankAGAR(data & 0x0F);
 		SetMmuPrefix( (data & 0x30)>>4);
 		return;
 		break;

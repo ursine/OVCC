@@ -19,6 +19,8 @@ This file is part of VCC (Virtual Color Computer).
 #include "logger.h"
 #include "idebus.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define MAX_PATH 260
 #define INVALID_HANDLE_VALUE NULL
@@ -269,7 +271,7 @@ void ByteSwap (char *String)
 	int Index=0,Index2=0;
 	int Lenth=strlen(String);
 	char *NewString=(char*)malloc(Lenth+1);
-	memset(NewString,NULL,Lenth+1);
+	memset(NewString,0,Lenth+1);
 
 	for (Index=0;Index<(Lenth+1);Index++)
 		if (String[Index^1])

@@ -9,10 +9,14 @@ endif
 
 ODIR = obj
 
-DEBUG=#-g
-OPT=-O2 # -flto # -Og
+DEBUG=#-g #-D _DEBUG
+OPT=-Ofast -march=native -flto # -Og # -Ofast #
 WARN = -w # -Wall
 PTHREAD = -pthread
+
+ifeq ($(TARGETOS),Darwin)
+CFLAGS += -D DARWIN
+endif
 
 SDLINC := $(shell pkg-config --cflags sdl2)
 AGARINC := $(shell agar-config --cflags)
@@ -20,7 +24,11 @@ IDIR = $(INCDIR) $(SDLINC) $(AGARINC)
 
 SDLLIB := $(shell sdl2-config --libs)
 AGARLIB := $(shell agar-config --libs)
-LIBS = $(SDLLIB) $(AGARLIB) -lrt # Comment out rt lib for Mac
+LIBS = $(SDLLIB) $(AGARLIB)
+
+ifneq ($(TARGETOS),Darwin)
+LIBS := $(LIBS) -lrt
+endif
 
 CFLAGS += $(DEBUG) $(OPT) $(WARN) $(IDIR)
 

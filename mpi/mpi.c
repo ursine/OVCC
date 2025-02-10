@@ -22,10 +22,10 @@ This file is part of VCC (Virtual Color Computer).
 #include <SDL2/SDL.h>
 #include <stdbool.h>
 #include "stdio.h"
-#include "mpi.h"
 #include "../CoCo/iniman.h"
 #define BOOL bool
 #include "../CoCo/fileops.h"
+#include "mpi.h"
 
 #define MAX_PATH 260
 
@@ -37,8 +37,7 @@ static unsigned char (*MemRead8)(unsigned short)=NULL;
 static void (*MemWrite8)(unsigned char,unsigned short)=NULL;
 static unsigned char (*MmuRead8)(unsigned char,unsigned short)=NULL;
 static void (*MmuWrite8)(unsigned char,unsigned char,unsigned short)=NULL;
-//static void (*PakRomShareCall)(MMUROMSHARE)=NULL;
-static void (*PakRomShareCall)(short, unsigned char *)=NULL;
+static void (*PakRomShareCall)(MMUROMSHARE)=NULL;
 static unsigned char *PakRomAddr=NULL;
 
 static void (*PakSetCart)(unsigned char)=NULL;
@@ -56,7 +55,7 @@ static INIman *iniman = NULL;
 
 //**************************************************************
 //Array of fuction pointer for each Slot
-static void (*GetModuleNameCalls[MAXPAX])(char *, AG_MenuItem *)={NULL,NULL,NULL,NULL};
+static void (*GetModuleNameCalls[MAXPAX])(char *, AG_MenuItem * /*, DYNAMICMENUCALLBACK*/)={NULL,NULL,NULL,NULL};
 static void (*ConfigModuleCalls[MAXPAX])(unsigned char)={NULL,NULL,NULL,NULL};
 static void (*HeartBeatCalls[MAXPAX])(void)={NULL,NULL,NULL,NULL};
 static void (*PakPortWriteCalls[MAXPAX])(unsigned char,unsigned char)={NULL,NULL,NULL,NULL};
@@ -81,7 +80,7 @@ static unsigned char CartForSlot[MAXPAX]={0,0,0,0};
 static void (*SetCarts[MAXPAX])(unsigned char)={SetCartSlot0,SetCartSlot1,SetCartSlot2,SetCartSlot3};
 static void (*SetCartCalls[MAXPAX])(SETCART)={NULL,NULL,NULL,NULL};
 //static void (*SetIniPathCalls[MAXPAX]) (char *)={NULL,NULL,NULL,NULL};
-static void (*SetIniPathCalls[MAXPAX]) (INIfile *)={NULL,NULL,NULL,NULL};
+static void (*SetIniPathCalls[MAXPAX]) (INIman *)={NULL,NULL,NULL,NULL};
 //***************************************************************
 static void *hinstLib[4]={NULL,NULL,NULL,NULL};
 static unsigned char ChipSelectSlot=3,SpareSelectSlot=3,SwitchSlot=3,SlotRegister=255;
@@ -163,11 +162,17 @@ void ADDCALL ModuleConfig(unsigned char func)
 	switch (func)
 	{
 	case 0: // Destroy Menus
-		AG_MenuDel(itemConfig);
-		AG_MenuDel(itemSeperator);
+		if (itemConfig)
+			AG_MenuDel(itemConfig);
+		itemConfig = NULL;
+		if (itemSeperator)
+			AG_MenuDel(itemSeperator);
+		itemSeperator = NULL;
 		for(int i = 0 ; i < MAXPAX ; i++)
 		{
-			AG_MenuDel(itemMenu[i]);
+			if (itemMenu[i])
+				AG_MenuDel(itemMenu[i]);
+			itemMenu[i] = NULL;
 		}
 	break;
 
@@ -193,10 +198,10 @@ void ADDCALL ModuleConfig(unsigned char func)
 void ADDCALL AssertInterupt(ASSERTINTERUPT Dummy)
 {
 	AssertInt=Dummy;
-	for (Temp=0;Temp<4;Temp++)
+	for (int modidx=0;modidx<4;modidx++)
 	{
-		if(SetInteruptCallPointerCalls[Temp] !=NULL)
-			SetInteruptCallPointerCalls[Temp](AssertInt);
+		if(SetInteruptCallPointerCalls[modidx] !=NULL)
+			SetInteruptCallPointerCalls[modidx](AssertInt);
 	}
 	return;
 }
@@ -229,11 +234,11 @@ unsigned char ADDCALL PackPortRead(unsigned char Port)
 	}
 
 	Temp2=0;
-	for (Temp=0;Temp<4;Temp++)
+	for (int modidx=0;modidx<4;modidx++)
 	{
-		if ( PakPortReadCalls[Temp] !=NULL)
+		if ( PakPortReadCalls[modidx] !=NULL)
 		{
-			Temp2=PakPortReadCalls[Temp](Port); //Find a Module that return a value 
+			Temp2=PakPortReadCalls[modidx](Port); //Find a Module that return a value 
 			if (Temp2!= 0)
 				return(Temp2);
 		}
@@ -243,9 +248,9 @@ unsigned char ADDCALL PackPortRead(unsigned char Port)
 
 void ADDCALL HeartBeat(void)
 {
-	for (Temp=0;Temp<4;Temp++)
-		if (HeartBeatCalls[Temp] != NULL)
-			HeartBeatCalls[Temp]();
+	for (int modidx=0;modidx<4;modidx++)
+		if (HeartBeatCalls[modidx] != NULL)
+			HeartBeatCalls[modidx]();
 	return;
 }
 
@@ -271,7 +276,7 @@ unsigned char ADDCALL PakMemRead8(unsigned short Address)
 		return(ExtRomPointers[ChipSelectSlot][(Address & 32767)/*+BankedCartOffset[ChipSelectSlot]*/]); //Bank Select ???
 	if (PakMemRead8Calls[ChipSelectSlot] != NULL)
 		return(PakMemRead8Calls[ChipSelectSlot](Address));
-	return(NULL);
+	return(0);
 }
 
 void ADDCALL PakMemWrite8(unsigned char Data,unsigned short Address)
@@ -283,12 +288,12 @@ void ADDCALL ModuleStatus(char *MyStatus)
 {
 	char TempStatus[64]="";
 	sprintf(MyStatus,"MPI:%i,%i",ChipSelectSlot,SpareSelectSlot);
-	for (Temp=0;Temp<4;Temp++)
+	for (int modidx=0;modidx<4;modidx++)
 	{
 		strcpy(TempStatus,"");
-		if (ModuleStatusCalls[Temp] != NULL)
+		if (ModuleStatusCalls[modidx] != NULL)
 		{
-			ModuleStatusCalls[Temp](TempStatus);
+			ModuleStatusCalls[modidx](TempStatus);
 			strcat(MyStatus,"|");
 			strcat(MyStatus,TempStatus);
 		}
@@ -299,9 +304,9 @@ void ADDCALL ModuleStatus(char *MyStatus)
 unsigned short ADDCALL ModuleAudioSample(void)
 {
 	unsigned short TempSample=0;
-	for (Temp=0;Temp<4;Temp++)
-		if (ModuleAudioSampleCalls[Temp] != NULL)
-			TempSample+=ModuleAudioSampleCalls[Temp]();
+	for (int modidx=0;modidx<4;modidx++)
+		if (ModuleAudioSampleCalls[modidx] != NULL)
+			TempSample+=ModuleAudioSampleCalls[modidx]();
 		
 	return(TempSample) ;
 }
@@ -310,37 +315,37 @@ unsigned char ADDCALL ModuleReset(void)
 {
 	ChipSelectSlot=SwitchSlot;	
 	SpareSelectSlot=SwitchSlot;	
-	for (Temp=0;Temp<4;Temp++)
+	for (int modidx=0;modidx<4;modidx++)
 	{
 		BankedCartOffset[Temp]=0; //Do I need to keep independant selects?
 		
-		if (SetInteruptCallPointerCalls[Temp] !=NULL)
-			SetInteruptCallPointerCalls[Temp](AssertInt);
+		if (SetInteruptCallPointerCalls[modidx] !=NULL)
+			SetInteruptCallPointerCalls[modidx](AssertInt);
 
-		if (DmaMemPointerCalls[Temp] !=NULL)
-			DmaMemPointerCalls[Temp](MemRead8,MemWrite8);
+		if (DmaMemPointerCalls[modidx] !=NULL)
+			DmaMemPointerCalls[modidx](MemRead8,MemWrite8);
 
-		if (MmuMemPointerCalls[Temp] !=NULL)
-			MmuMemPointerCalls[Temp](MmuRead8,MmuWrite8);
+		if (MmuMemPointerCalls[modidx] !=NULL)
+			MmuMemPointerCalls[modidx](MmuRead8,MmuWrite8);
 
-		if (Temp == ChipSelectSlot)
-			if (PakRomShareCalls[Temp] != NULL)
-				PakRomShareCalls[Temp](PakRomAddr);
+		if (modidx == ChipSelectSlot)
+			if (PakRomShareCalls[modidx] != NULL && PakRomAddr != NULL)
+				PakRomShareCalls[modidx](PakRomAddr);
 		
 		//PakRomShareCalls[Temp] = NULL;
 
-		if (ModuleResetCalls[Temp] !=NULL)
-			ModuleResetCalls[Temp]();
+		if (ModuleResetCalls[modidx] !=NULL)
+			ModuleResetCalls[modidx]();
 
 		//ModuleResetCalls[Temp] = NULL;
 
-		if (PakRomAddr != NULL && ExtRomPointers[Temp] != NULL && ExtRomSizes[Temp] != 0)
-			memcpy(PakRomAddr, ExtRomPointers[Temp], ExtRomSizes[Temp]);
+		if (PakRomAddr != NULL && ExtRomPointers[modidx] != NULL && ExtRomSizes[modidx] != 0)
+			memcpy(PakRomAddr, ExtRomPointers[modidx], ExtRomSizes[modidx]);
 	}
 	PakSetCart(0);
 	if (CartForSlot[SpareSelectSlot]==1)
 		PakSetCart(1);
-	return(NULL);
+	return(0);
 }
 
 void ADDCALL PakRomShare(unsigned char *pakromaddr)
@@ -393,7 +398,7 @@ void ConfigMPI(AG_Event *event)
         return;
     }
 
-    AG_WindowSetGeometryAligned(win, AG_WINDOW_ALIGNMENT_NONE, 440, 294);
+    AG_WindowSetGeometryAligned(win, AG_WINDOW_ALIGNMENT_NONE, 454, 350);
     AG_WindowSetCaptionS(win, "MPI Config");
     AG_WindowSetCloseAction(win, AG_WINDOW_DETACH);
 
@@ -605,7 +610,10 @@ static void RetriggerModuleShare(void)
 	if (ExtRomPointers[ChipSelectSlot] != NULL) 
 	{
 		//fprintf(stderr, "MPI calling PakRomShare call back with ROM\n");
-		PakRomShareCall((unsigned short) ExtRomSizes[ChipSelectSlot], ExtRomPointers[ChipSelectSlot]);
+		if (PakRomShareCall != NULL)
+		{
+			PakRomShareCall(ExtRomPointers[ChipSelectSlot]);
+		}
 	}
 }
 
@@ -626,9 +634,9 @@ void LoadConfig(void)
 	GetPrivateProfileString(ModName,"SLOT4","",ModulePaths[3],MAX_PATH,IniFile);
 	CheckPath(ModulePaths[3]);
 	BuildMenu();
-	for (Temp=0;Temp<4;Temp++)
-		if (strlen(ModulePaths[Temp]) !=0)
-			MountModule(Temp, ModulePaths[Temp]);
+	for (int modidx=0;modidx<4;modidx++)
+		if (strlen(ModulePaths[modidx]) !=0)
+			MountModule(modidx, ModulePaths[modidx]);
 	//RetriggerModuleShare();
 	return;
 }
@@ -787,7 +795,7 @@ void UpdateMenu(unsigned char slot)
 	AG_MenuSetLabel(itemEjectSlot[slot], "Eject : %s", slotname);
 }
 
-int LoadSlot(AG_Event *event)
+void LoadSlot(AG_Event *event)
 {
 	int slot = AG_INT(1);
 	char *file = AG_STRING(2);
@@ -807,7 +815,7 @@ void BrowseSlot(AG_Event *event)
 {
 	int slot = AG_INT(1);
 	
-    AG_Window *fdw = AG_WindowNew(AG_WINDOW_DIALOG);
+    AG_Window *fdw = AG_WindowNew(0);
     AG_WindowSetCaption(fdw, "Program Paks");
     AG_WindowSetGeometryAligned(fdw, AG_WINDOW_ALIGNMENT_NONE, 500, 500);
     AG_WindowSetCloseAction(fdw, AG_WINDOW_DETACH);
@@ -847,6 +855,7 @@ void BuildMenu(void)
 		}
 	}
 
-	itemConfig = AG_MenuNode(menuAnchor, "MPI Config", NULL);
-	AG_MenuAction(itemConfig, "Config", NULL, ConfigMPI, NULL);
+	// itemConfig = AG_MenuNode(menuAnchor, "MPI Config", NULL);
+	// AG_MenuAction(itemConfig, "Config", NULL, ConfigMPI, NULL);
+	itemConfig = AG_MenuAction(menuAnchor, "MPI Config", NULL, ConfigMPI, NULL);
 }

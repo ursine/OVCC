@@ -81,13 +81,14 @@ static unsigned char RightButton2Status = 0;
 static unsigned char LeftStickNumber = 0;
 static unsigned char RightStickNumber = 0;
 
+unsigned char ComparatorSetByDischarge = 0;
 
 /*****************************************************************************/
 //
 // keyboard
 //
 
-#define KBTABLE_ENTRY_COUNT 100	///< key translation table maximum size, (arbitrary) most of the layouts are < 80 entries
+#define KBTABLE_ENTRY_COUNT 128	///< key translation table maximum size, (arbitrary) most of the layouts are < 80 entries
 #define KEY_DOWN	1
 #define KEY_UP		0
 
@@ -111,7 +112,7 @@ static keytranslationentry_t KeyTransTable[KBTABLE_ENTRY_COUNT];	// run-time key
 
 	should be a push instead of a pull?
 */
-unsigned char vccKeyboardGetScanSDL(unsigned char Col)
+unsigned char vccKeyboardGetScanAGAR(unsigned char Col)
 {
 	unsigned char temp;
 	unsigned char x;
@@ -135,14 +136,31 @@ unsigned char vccKeyboardGetScanSDL(unsigned char Col)
 	}
 	ret_val = 127 - ret_val;
 
-	//	MuxSelect=GetMuxState();	//Collect CA2 and CB2 from the PIA (1of4 Multiplexer)
-	StickValue = get_pot_valueSDL(GetMuxState());
-	if (StickValue != 0)		//OS9 joyin routine needs this (koronis rift works now)
+	switch (LeftSDL.HiRes)
 	{
-		if (StickValue >= DACState())		// Set bit of stick >= DAC output $FF20 Bits 7-2
-		{
-			ret_val |= 0x80;
-		}
+		case 0: // Regular joystick mouse
+			//	MuxSelect=GetMuxState();	//Collect CA2 and CB2 from the PIA (1of4 Multiplexer)
+			StickValue = get_pot_valueSDL(GetMuxState());
+			if (StickValue != 0)		//OS9 joyin routine needs this (koronis rift works now)
+			{
+				if (StickValue >= DACState())		// Set bit of stick >= DAC output $FF20 Bits 7-2
+				{
+					ret_val |= 0x80;
+				}
+			}
+			break;
+
+		case 1: // Hi-res joystick mouse
+			// if (ComparatorSetByDischarge) {
+			// 	fprintf(stdout, "#"); fflush(stdout);
+			// }
+
+			ret_val |= ComparatorSetByDischarge;  // this gets set in the main CPU exec loop if a DAC discharge has occurred
+			ComparatorSetByDischarge = 0;  // It appears reading the comparator bit clears the bit. So must do this!
+			break;
+
+		default:
+			break;
 	}
 
 	if (LeftButton1Status == 1)
@@ -191,6 +209,10 @@ unsigned char vccKeyboardGetScanSDL(unsigned char Col)
 	#endif
 
 	//if (ret_val != 0xFF) fprintf(stderr, "<%2x>", ret_val);
+	if (ret_val != 0xFF)
+	{
+		//XTRACE("Key <%2X>\n", ret_val);
+	}
 	return (ret_val);
 }
 
@@ -286,7 +308,8 @@ static void _vccKeyboardUpdateRolloverTable()
 */
 void vccKeyboardHandleKeySDL(unsigned short key, unsigned short ScanCode, unsigned short keyState)
 {
-	XTRACE("Key  : %c (%3d / 0x%02X)  Scan : %d / 0x%02X\n",key,key,key, ScanCode, ScanCode);
+	XTRACE("Key : %c (%3d / 0x%02X)  Scan : %d / 0x%02X  State : %d\n",
+	       (key >= 0x20 && key <= 0x7f) ? key : ' ', key, key, ScanCode, ScanCode, keyState);
 
 	// check for shift key
 	// Left and right shift generate different scan codes
@@ -294,16 +317,18 @@ void vccKeyboardHandleKeySDL(unsigned short key, unsigned short ScanCode, unsign
 	{
 		ScanCode = AG_KEY_LSHIFT;
 	}
-#if 0 // TODO: CTRL and/or ALT?
+#ifdef DARWIN
 	// CTRL key - right -> left
-	if (ScanCode == DIK_RCONTROL)
+	if (ScanCode == AG_KEY_RCTRL)
 	{
-		ScanCode = DIK_LCONTROL;
+		ScanCode = AG_KEY_LCTRL;
 	}
+#endif
+#if 0 // TODO: ALT?
 	// ALT key - right -> left
-	if (ScanCode == DIK_RMENU)
+	if (ScanCode == AG_KEY_RALT)
 	{
-		ScanCode = DIK_LMENU;
+		ScanCode = AG_KEY_LALT;
 	}
 #endif
 
@@ -311,14 +336,17 @@ void vccKeyboardHandleKeySDL(unsigned short key, unsigned short ScanCode, unsign
 	{
 		default:
 			// internal error
+			XTRACE("keyState error\n");
 		break;
 
 		// Key Down
 		case kEventKeyDown:
+			XTRACE("Key %02X down\n", ScanCode);
 			if (  (LeftSDL.UseMouse == JOYSTICK_KEYBOARD)
 				| (RightSDL.UseMouse == JOYSTICK_KEYBOARD)
 				)
 			{
+				XTRACE("Mouse\n");
 				ScanCode = SetMouseStatusSDL(ScanCode, 1);
 			}
 
@@ -335,10 +363,12 @@ void vccKeyboardHandleKeySDL(unsigned short key, unsigned short ScanCode, unsign
 
 		// Key Up
 		case kEventKeyUp:
+			XTRACE("Key %02X up\n", ScanCode);
 			if (  (LeftSDL.UseMouse == JOYSTICK_KEYBOARD)
 				| (RightSDL.UseMouse == JOYSTICK_KEYBOARD)
 				)
 			{
+				XTRACE("Mouse\n");
 				ScanCode = SetMouseStatusSDL(ScanCode, 0);
 			}
 
@@ -349,6 +379,7 @@ void vccKeyboardHandleKeySDL(unsigned short key, unsigned short ScanCode, unsign
 			// Clean out rollover table on shift release
 			if ( ScanCode == AG_KEY_LSHIFT )
 			{
+				XTRACE("Clearing table\n");
 				for (int Index = 0; Index < KBTABLE_ENTRY_COUNT; Index++)
 				{
 					ScanTable[Index] = KEY_UP;
@@ -462,7 +493,7 @@ static int keyTransCompare(const void * e1, const void * e2)
 
 	The entries are sorted.  Any SHIFT + [char] entries need to be placed first
 */
-void vccKeyboardBuildRuntimeTableSDL(keyboardlayout_e keyBoardLayout)
+void vccKeyboardBuildRuntimeTableAGAR(keyboardlayout_e keyBoardLayout)
 {
 	int Index1 = 0;
 	int Index2 = 0;
@@ -474,15 +505,15 @@ void vccKeyboardBuildRuntimeTableSDL(keyboardlayout_e keyBoardLayout)
 	switch (keyBoardLayout)
 	{
 		case kKBLayoutCoCo:
-			keyLayoutTable = keyTranslationsCoCoSDL;
+			keyLayoutTable = keyTranslationsCoCoAGAR;
 		break;
 
 		case kKBLayoutNatural:
-			keyLayoutTable = keyTranslationsNaturalSDL;
+			keyLayoutTable = keyTranslationsNaturalAGAR;
 			break;
 
 		case kKBLayoutCompact:
-			keyLayoutTable = keyTranslationsCompactSDL;
+			keyLayoutTable = keyTranslationsCompactAGAR;
 			break;
 
 		//case kKBLayoutCustom:
@@ -594,11 +625,24 @@ void vccKeyboardBuildRuntimeTableSDL(keyboardlayout_e keyBoardLayout)
 */
 void joystickSDL(unsigned short x,unsigned short y)
 {
+	switch (LeftSDL.HiRes)
+	{
+		case 0: // Regular joystick mouse
+			x /= 10;
+			y /= 7.5;
+			if (x>63) x=63;
+			if (y>63) y=63;
+			break;
 
-	if (x>63)
-		x=63;
-	if (y>63)
-		y=63;
+		case 1:  // Hi-res joystick mouse
+			y *= 1.3;
+			if (x>639) x=639;
+			if (y>639) y=639;
+			break;
+
+		default:
+			break;
+	}
 
 	if (LeftSDL.UseMouse==JOYSTICK_MOUSE)
 	{
@@ -612,6 +656,25 @@ void joystickSDL(unsigned short x,unsigned short y)
 	}
 
 	return;
+}
+
+void DoKeyBoardEvent(unsigned short key, unsigned short scancode, unsigned short state)
+{
+	vccKeyboardHandleKeySDL(key, scancode, state);
+}
+
+void DoButton(int button, int state)
+{
+	switch (button)
+	{
+		case SDL_BUTTON_LEFT:
+			SetButtonStatusSDL(0, state);
+		break;
+
+		case SDL_BUTTON_RIGHT:
+			SetButtonStatusSDL(1, state);
+		break;
+	}
 }
 
 /*****************************************************************************/
@@ -872,6 +935,17 @@ void SetButtonStatusSDL(unsigned char Side,unsigned char State) //Side=0 Left Bu
 		}
 }
 
+void GetLeftJoystickValues(int *joyx, int *joyy)
+{
+	*joyx = LeftStickX;
+	*joyy = LeftStickY;
+}
+
+void GetRightJoystickValues(int *joyx, int *joyy)
+{
+	*joyx = RightStickX;
+	*joyy = RightStickY;
+}
 /*****************************************************************************/
 
 

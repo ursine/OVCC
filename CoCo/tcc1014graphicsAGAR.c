@@ -17,7 +17,8 @@ This file is part of VCC (Virtual Color Computer).
 */
 
 #include "defines.h"
-#include "tcc1014graphicsSDL.h"
+#include "tcc1014graphicsAGAR.h"
+#include "AGARInterface.h"
 #include "coco3.h"
 #include "cc2font.h"
 #include "cc3font.h"
@@ -26,12 +27,14 @@ This file is part of VCC (Virtual Color Computer).
 #include "math.h"
 #include <stdio.h>
 
+#define ALPHA1 (0xFF<<24)
+
 void SetupDisplay(void); //This routine gets called every time a software video register get updated.
 void MakeRGBPalette (void);
 void MakeCMPpalette(void);
-void SetupDisplaySDL(void);
-void MakeRGBPaletteSDL(void);
-void MakeCMPpaletteSDL(void);
+void SetupDisplayAGAR(void);
+void MakeRGBPaletteAGAR(void);
+void MakeCMPpaletteAGAR(void);
 static unsigned char ColorValues[4]={0,85,170,255};
 static unsigned char ColorTable16Bit[4]={0,10,21,31};	//Color brightness at 0 1 2 and 3 (2 bits)
 static unsigned char ColorTable32Bit[4]={0,85,170,255};	
@@ -82,7 +85,7 @@ unsigned char Lpf[4]={192,199,225,225}; // 2 is really undefined but I gotta put
 unsigned char VcenterTable[4]={29,23,12,12};
 
 // BEGIN of 32 Bit render loop *****************************************************************************************
-void UpdateScreenSDL (SystemState2 *USState32)
+void UpdateScreen (SystemState2 *USState32)
 {
 	register unsigned int YStride=0;
 	unsigned char Pixel=0;
@@ -99,7 +102,9 @@ void UpdateScreenSDL (SystemState2 *USState32)
 	long Xpitch=USState32->SurfacePitch;
 	Carry1=1;
 	Pcolor=0;
-	
+
+	if (USState32->Pixels == NULL) return;
+
 	if ( (HorzCenter!=0) & (BoarderChange>0) )
 		for (unsigned short x=0;x<HorzCenter;x++)
 		{
@@ -3179,10 +3184,10 @@ void UpdateScreenSDL (SystemState2 *USState32)
 // END of 32 Bit render loop *****************************************************************************************
 
 
-void DrawTopBoarderSDL(SystemState2 *DTState)
+void DrawTopBoarderAGAR(SystemState2 *DTState)
 {
-
 	unsigned short x;
+
 	if (BoarderChange==0)
 		return;
 
@@ -3197,7 +3202,7 @@ void DrawTopBoarderSDL(SystemState2 *DTState)
 
 
 
-void DrawBottomBoarderSDL(SystemState2 *DTState)
+void DrawBottomBoarderAGAR(SystemState2 *DTState)
 {
 	if (BoarderChange==0)
 		return;	
@@ -3212,40 +3217,40 @@ void DrawBottomBoarderSDL(SystemState2 *DTState)
 	return;
 }
 
-void SetBlinkStateSDL(unsigned char Tmp)
+void SetBlinkStateAGAR(unsigned char Tmp)
 {
 	BlinkState=Tmp;
 	return;
 }
 
 // These grab the Video info for all COCO 2 modes
-void SetGimeVdgOffsetSDL (unsigned char Offset)
+void SetGimeVdgOffsetAGAR (unsigned char Offset)
 {
 	if ( CC2Offset != Offset)
 	{
 		CC2Offset=Offset;
-		SetupDisplaySDL();
+		SetupDisplayAGAR();
 	}
 	return;
 }
 
-void SetGimeVdgModeSDL (unsigned char VdgMode) //3 bits from SAM Registers
+void SetGimeVdgModeAGAR (unsigned char VdgMode) //3 bits from SAM Registers
 {
 	if (CC2VDGMode != VdgMode)
 	{
 		CC2VDGMode=VdgMode;
-		SetupDisplaySDL();
+		SetupDisplayAGAR();
 		BoarderChange=3;
 	}
 	return;
 }
 
-void SetGimeVdgMode2SDL (unsigned char Vdgmode2) //5 bits from PIA Register
+void SetGimeVdgMode2AGAR (unsigned char Vdgmode2) //5 bits from PIA Register
 {
 	if (CC2VDGPiaMode != Vdgmode2)
 	{
 		CC2VDGPiaMode=Vdgmode2;
-		SetupDisplaySDL();
+		SetupDisplayAGAR();
 		BoarderChange=3;
 	}
 	return;
@@ -3253,29 +3258,29 @@ void SetGimeVdgMode2SDL (unsigned char Vdgmode2) //5 bits from PIA Register
 
 //These grab the Video info for all COCO 3 modes
 
-void SetVerticalOffsetRegisterSDL(unsigned short Register)
+void SetVerticalOffsetRegisterAGAR(unsigned short Register)
 {
 	if (VerticalOffsetRegister != Register)
 	{
 		VerticalOffsetRegister=Register;
 
-		SetupDisplaySDL();
+		SetupDisplayAGAR();
 	}
 	return;
 }
 
-void SetCompatModeSDL( unsigned char Register)
+void SetCompatModeAGAR( unsigned char Register)
 {
 	if (CompatMode != Register)
 	{
 		CompatMode=Register;
-		SetupDisplaySDL();
+		SetupDisplayAGAR();
 		BoarderChange=3;
 	}
 	return;
 }
 
-void SetGimePalletSDL(unsigned char pallete,unsigned char color)
+void SetGimePalletAGAR(unsigned char pallete,unsigned char color)
 {
 	// Convert the 6bit rgbrgb value to rrrrrggggggbbbbb for the Real video hardware.
 	//	unsigned char r,g,b;
@@ -3286,52 +3291,52 @@ void SetGimePalletSDL(unsigned char pallete,unsigned char color)
 	return;
 }
 
-void SetGimeVmodeSDL(unsigned char vmode)
+void SetGimeVmodeAGAR(unsigned char vmode)
 {
 	if (CC3Vmode != vmode)
 	{
 		CC3Vmode=vmode;
-		SetupDisplaySDL();
+		SetupDisplayAGAR();
 		BoarderChange=3;
 
 	}
 	return;
 }
 
-void SetGimeVresSDL(unsigned char vres)
+void SetGimeVresAGAR(unsigned char vres)
 {
 	if (CC3Vres != vres)
 	{
 		CC3Vres=vres;
-		SetupDisplaySDL();
+		SetupDisplayAGAR();
 		BoarderChange=3;
 	}
 	return;
 }
 
-void SetGimeHorzOffsetSDL(unsigned char data)
+void SetGimeHorzOffsetAGAR(unsigned char data)
 {
 	if (HorzOffsetReg != data)
 	{
 		Hoffset=(data<<1);
 		HorzOffsetReg=data;
-		SetupDisplaySDL();
+		SetupDisplayAGAR();
 	}
 	return;
 }
-void SetGimeBoarderColorSDL(unsigned char data)
+void SetGimeBoarderColorAGAR(unsigned char data)
 {
 
 	if (CC3BoarderColor != (data & 63) )
 	{
 		CC3BoarderColor= data & 63;
-		SetupDisplaySDL();
+		SetupDisplayAGAR();
 		BoarderChange=3;
 	}
 	return;
 }
 
-void SetBoarderChangeSDL(unsigned char data)
+void SetBoarderChangeAGAR(unsigned char data)
 {
 	if (BoarderChange >0)
 		BoarderChange--;
@@ -3339,14 +3344,14 @@ void SetBoarderChangeSDL(unsigned char data)
 	return;
 }
 
-void InvalidateBoarderSDL(void)
+void InvalidateBoarderAGAR(void)
 {
 	BoarderChange=5;
 	return;
 }
 
 
-void SetupDisplaySDL(void)
+void SetupDisplayAGAR(void)
 {
 
 	static unsigned char CC2Bpp[8]={1,0,1,0,1,0,1,0};
@@ -3455,7 +3460,7 @@ void SetupDisplaySDL(void)
 }
 
 
-void GimeInitSDL(void)
+void GimeInitAGAR(void)
 {
 	//Nothing but good to have.
 	return;
@@ -3463,7 +3468,7 @@ void GimeInitSDL(void)
 
 
 
-void GimeResetSDL(void)
+void GimeResetAGAR(void)
 {
 	CC3Vmode=0;
 	CC3Vres=0;
@@ -3476,8 +3481,8 @@ void GimeResetSDL(void)
 	HorzOffsetReg=0;
 	TagY=0;
 	DistoOffset=0;
-	MakeRGBPaletteSDL();
-	MakeCMPpaletteSDL();
+	MakeRGBPaletteAGAR();
+	MakeCMPpaletteAGAR();
 	BoarderChange=3;
 	CC2Offset=0;
 	Hoffset=0;
@@ -3486,21 +3491,21 @@ void GimeResetSDL(void)
 	return;
 }
 
-void SetVidMaskSDL(unsigned int data)
+void SetVidMaskAGAR(unsigned int data)
 {
 	VidMask=data;
 	return;
 }
 
-void SetVideoBankSDL(unsigned char data)
+void SetVideoBankAGAR(unsigned char data)
 {
 	DistoOffset= data * (512*1024);
-	SetupDisplaySDL();
+	SetupDisplayAGAR();
 	return;
 }
 
 
-void MakeRGBPaletteSDL(void)
+void MakeRGBPaletteAGAR(void)
 {
 	unsigned char Index=0;
 	unsigned char r,g,b;
@@ -3517,7 +3522,7 @@ void MakeRGBPaletteSDL(void)
 		r= ColorTable32Bit [(Index & 32) >> 4 | (Index & 4) >> 2];	
 		g= ColorTable32Bit [(Index & 16) >> 3 | (Index & 2) >> 1];	
 		b= ColorTable32Bit [(Index & 8 ) >> 2 | (Index & 1) ];		
-		PalleteLookup32[1][Index]= (r* 65536) + (g* 256) + b;
+		PalleteLookup32[1][Index]= (b * 65536) + (g * 256) + r + ALPHA1;
 		
 		
 		
@@ -3526,7 +3531,7 @@ void MakeRGBPaletteSDL(void)
 }
 
 
-void MakeCMPpaletteSDL(void)	//Stolen from M.E.S.S.
+void MakeCMPpaletteAGAR(void)	//Stolen from M.E.S.S.
 {
 	double saturation, brightness, contrast;
 	int offset;
@@ -3586,7 +3591,7 @@ void MakeCMPpaletteSDL(void)	//Stolen from M.E.S.S.
 		rr= (unsigned char)r;
 		gg= (unsigned char)g;
 		bb= (unsigned char)b;
-		PalleteLookup32[0][Index]= (rr<<16) | (gg<<8) | bb;
+		PalleteLookup32[0][Index]= (bb<<16) | (gg<<8) | rr | ALPHA1 ;
 		rr=rr>>3;
 		gg=gg>>3;
 		bb=bb>>3;
@@ -3598,7 +3603,7 @@ void MakeCMPpaletteSDL(void)	//Stolen from M.E.S.S.
 	}
 }
 
-unsigned char SetMonitorTypeSDL(unsigned char Type)
+unsigned char SetMonitorTypeAGAR(unsigned char Type)
 {
 	unsigned char PalNum=0;
 	if (Type != QUERY)
@@ -3615,13 +3620,13 @@ unsigned char SetMonitorTypeSDL(unsigned char Type)
 	return(MonType);
 }
 
-unsigned char SetScanLinesSDL(unsigned char Lines)
+unsigned char SetScanLinesAGAR(unsigned char Lines)
 {
 	extern SystemState2 EmuState2;
 	if (Lines!=QUERY)
 	{
 		EmuState2.ScanLines=Lines;
-		ClsSDL(0,&EmuState2);
+		ClsAGAR(0,&EmuState2);
 		BoarderChange=3;
 	}
 	return(0);

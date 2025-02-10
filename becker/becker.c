@@ -3,6 +3,7 @@
 #include <agar/core.h>
 #include <agar/gui.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #ifdef __MINGW32__
 #include <winsock2.h>
@@ -166,6 +167,9 @@ int dw_write( char dwdata)
 void killDWTCPThread(void)
 {
 	// close socket to cause io thread to die
+	DWTCPEnabled = false;
+	usleep(TCP_RETRY_DELAY*1000);
+
 	if (dwSocket != 0)
 #ifdef __MINGW32__
 			closesocket(dwSocket);
@@ -174,7 +178,7 @@ void killDWTCPThread(void)
 #endif
 
 	dwSocket = 0;
-	
+		
 	// reset buffer po
 	InReadPos = 0;
 	InWritePos = 0;
@@ -288,7 +292,7 @@ void attemptDWConnection( void )
 }
 
 // TCP connection thread
-unsigned  DWTCPThread(void)
+void *DWTCPThread(void *p)
 {
 #ifdef __MINGW32__
 	WSADATA wsaData;
@@ -304,7 +308,7 @@ unsigned  DWTCPThread(void)
 	{
 		fprintf(stderr, "WSAStartup() failed, DWTCPConnection thread exiting\n");
 		WSACleanup();
-		return(0);
+		return(p);
 	}
 #endif
 
@@ -371,7 +375,10 @@ unsigned  DWTCPThread(void)
 			
 	dwSocket = 0;
 
-	return(0);
+	sprintf(msg,"DWTCPConnection thread terminated\n");
+	fprintf(stderr, "%s", msg);
+
+	return(p);
 }
 
 // called from config.c/UpdateConfig
@@ -588,8 +595,9 @@ void BuildMenu(void)
 	if (itemConfig == NULL)
 	{
         itemSeperator = AG_MenuSeparator(menuAnchor);
-	    itemConfig = AG_MenuNode(menuAnchor, "DriveWire Server", NULL);
-		AG_MenuAction(itemConfig, "Config", NULL, ConfigBecker, NULL);
+	    // itemConfig = AG_MenuNode(menuAnchor, "DriveWire Server", NULL);
+		// AG_MenuAction(itemConfig, "Config", NULL, ConfigBecker, NULL);
+		itemConfig = AG_MenuAction(menuAnchor, "Config DW Server", NULL, ConfigBecker, NULL);
 	}
 }
 
@@ -599,8 +607,13 @@ void ADDCALL ModuleConfig(unsigned char func)
 	{
 	case 0: // Destroy Menus
 	{
-		AG_MenuDel(itemConfig);
-		AG_MenuDel(itemSeperator);
+		killDWTCPThread();
+		if (itemConfig)
+			AG_MenuDel(itemConfig);
+		itemConfig = NULL;
+		if (itemSeperator)
+			AG_MenuDel(itemSeperator);
+		itemSeperator = NULL;
 	}
 	break;
 

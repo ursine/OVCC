@@ -1,51 +1,65 @@
-# OVCC
+# OVCC 1.6.1
 
 The portable and open Virtual Colo(u)r Computer. GNU General Public License.
 
 Developed from VCC 1.43 (2.01) by Joseph Forgione. GNU General Public License.
 
+Special thanks to Paul Zimmerman for providing Mac patches for OVCC and AGAR.  OVCC patches are pre-integrated.
 
-Compiling guide.
+Binaries for Linux and Windows and Mac can be downloaded from here:
 
+https://drive.google.com/drive/folders/1xL8jWnwWLKL9D6K5ZNHIYRGNySIipEKV?usp=sharing
+
+A Mac binary is hosted here (By Paul Zimmerman):
+
+https://drive.google.com/drive/folders/1Va9Vq35dOAkd4joCtuB7zRYQ8CY6mssN?usp=sharing
 
 OVCC Dependancies:
 
-the original AGAR 1.5.0 source is available from https://libagar.org/download.html
+AGAR (libraries)
+
+The binary library for Windows are available from the AGAR download site. https://libagar.org/download.html
+As of version 1.7.1 AGAR no longer provides the binary versions.
+
+The binary libraries for Ubuntu 18.04 & 20.04 are available from:
+
+https://drive.google.com/drive/folders/1V2a27j_n9BoMDaHfvzDtAXcfv_IL_TBV?usp=sharing
+
+SDL2 (libraries) (libSDL2-dev)
+
+Install SDL2 (dev) as per your distribution guidelines.
+
+Compiling AGAR.
+
+Included with the OVCC is a directory containing patches for AGAR for Mac builds.  Not required if building for anything else.
+They are located ovcc/Patches/AGAR.  Apply the patches before building AGAR. Patches kindly provided by Paul Zimmerman.
+
+If compiling the original AGAR 1.7.0 source is available from https://libagar.org/download.html
+however it is recommended that you download the source from the github site https://github.com/JulNadeauCA/libagar.git
+this is version 1.7.1 and contains fixes that affect ovcc.
 
 AGAR also has its dependancies so read the compilation documentation for the relevant platforms here https://libagar.org/docs/
 
-OVCC requires additional AGAR SDL2 drivers and feature patches in order to compile.
-
-The source for those additional patches and drivers are located here:
-
-https://drive.google.com/drive/folders/1AwqpwM3JeLzOXsBsxrChQUqCO-TRxheG?usp=sharing
-
-Alternatively you can download a copy of the source (for Linux/OSX) with the patches already installed from: 
-
-https://github.com/WallyZambotti/AGAR-SDL2  (does not contain the Docs directory)
-
-Look in the Docs directory for instructions on including the patches for your platform. (Mingw or Linux/OSX)  The github version does not contain the Docs directory but there is an included readme that the github repo brings to your attention.
-
 Build AGAR as per AGAR documentation with the exception/addition of the configuration options mentioned in the forementioned Docs.
 
-./configure --with-sdl2 --without-sdl  # if you don't intend to debug AGAR
+Compiling OVCC
 
-./configure --enable-debug --with-sdl2 --without-sdl # if you intend to DEBUG AGAR
-
-./configure --with-sdl2 --without-sdl --with-libtool=/usr/bin/libtool # if the configuration can't locate the libtool
-
-( sdl2 driver cannot coexist with the sdl driver -
-  you may need to explicitly define the "libtool" for the configuration to use if the 'make depends all' fails with libtool errors)
+Once AGAR 1.7.1 and SDL2 are installed clone this OVCC repository change into the top directory make.
   
-  Once AGAR is built and installed clone this OVCC repository change into the top directory and locate the makefile.
-  
-  Edit the two first lines of the makefile to reflect you environment:
-  
-export TARGETOS = Linux  # options are Linux or Mingw
+$ make
 
-export TARGETARCH = AMD  # options are AMD (Intel) or ARM
+------------
 
-Then make.
+To make the isolated CPU version you will need to follow these manual steps:
+
+1. After completeling a success make.
+2. cd into the CoCo dir (cd CoCo)
+3. rm obj/coco3.o obj/vcc.o obj/vccgui.o
+4. make -f Makefiles/Linux/makefile-isocpu
+
+The executable ovcc-isocpu should be created.
+
+------------
 
 After OVCC and all device libraries are built OVCC needs to be able to find the libraries.  The easiest approach is to copy the ovcc(.exe) executable to a clean directory and place the libraries in a sub directory of that folder.
 
@@ -98,15 +112,19 @@ Mingw(Windows)
         vhds\
               VCCEmuDisk.vhd
 ```
-When loading roms and devices into ovcc you will be asked to navigate and select the necessary rom/device(library) so they could be anywhere. However having an organised folder structure will make manually editing the Vcc.ini (if required) easier.
+When loading roms and devices into ovcc you will be asked to navigate and select the necessary rom/device(library) so they could be anywhere. However having an organised folder structure will make manualy editing the Vcc.ini (if required) easier.
 
 Ovcc can be started from a terminal or added to your desktop GUI menu. On windows it should be started from a bat file that defines the paths to necessary Mingw libraries
+
+------------
 
 The necessary Windows (Mingw runtime libraries) can be found here:
 
 https://drive.google.com/drive/folders/1V2a27j_n9BoMDaHfvzDtAXcfv_IL_TBV?usp=sharing
 
 If you have built your Mingw environment correctly you should not need them.  However if you are copying the Mingw binaries to another system the above link identifies all the libraries you will also need to copy.
+
+------------
 
 Linux & Windows 10 PS4 Joystick support
 
@@ -117,3 +135,41 @@ https://github.com/chrippa/ds4drv
 And for Windows here :
 
 http://ds4windows.com
+
+------------
+
+Mac developers need to be aware that OVCC uses the cocoa graphics driver.  This means that if ovcc is started from a terminal the keyboard I/O will not be directed to the application but will instead remain with the terminal that started ovcc.
+
+To overcome this ovcc should be started from a bundle.  The ovcc repo now provides support for building on Mac OS using xCode. Install xCode and the xCode developement extension tools.  Use brew to install the necessary libraries as described on the LIB AGAR site. Build AGAR as well.  Install the dylibbuilder uitility found here: https://github.com/auriamg/macdylibbundler.git and apply the fix found here: https://github.com/auriamg/macdylibbundler/issues/77.  I found it quite tricky to setup xCode to make it build and install OVCC.  It requires creating targets and editing the schema.  It is easer to just do it from a terminal.  If everything builds cleanly then make install will build the bundle.  Launch OVCC by double clicking on the ovcc.app (bundle) file.  The ovcc.app can be copied to the Applications folder.
+
+------------
+
+For Ubuntu developers there were a number of missing dependencies not mentioned on the AGAR web site.  These missing dependencies will not stop AGAR from building but will mean certain options like OpenGL support are
+missing:
+
+ligopengl-dev (provides the obvious)
+mesa-common-dev (provides gl.h)
+libglu1-mesa-dev (provides glu.h)
+
+These other optional dependencies may also be usefull:
+
+```libfreetype6-dev (very useful)
+libfontconfig-dev (very useful)
+libjpeg8-dev (very useful)
+libjpeg8-turbo-dev (very useful)
+libpng-dev (very useful)
+libxinerama-dev  (optional)
+libsndio-dev
+libsndio6.1 (or 6,  SDL2 will not work with version 7)
+```
+
+Once all these dependencies have been added there is no need to change the AGAR configure. Just do this :
+
+```$ cd libagar
+$ export CFLAGS=-O2
+$ ./configure
+$ make depend all
+$ sudo make install
+```
+
+(The export CFLAGS will ensure the build is performed with compiler optimizations.)

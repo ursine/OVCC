@@ -27,7 +27,7 @@ This file is part of VCC (Virtual Color Computer).
 #include "joystickinputSDL.h"
 #include "vcc.h"
 #include "tcc1014mmu.h"
-#include "tcc1014graphicsSDL.h"
+#include "tcc1014graphicsAGAR.h"
 #include "tcc1014registers.h"
 #include "hd6309.h"
 #include "mc6809.h"
@@ -40,8 +40,7 @@ This file is part of VCC (Virtual Color Computer).
 #include "quickload.h"
 #include "throttle.h"
 #include "logger.h"
-#include "sdl2driver.h"
-#include "SDLInterface.h"
+#include "AGARInterface.h"
 
 SystemState2 EmuState2;
 static bool DialogOpen=false;
@@ -50,14 +49,15 @@ static unsigned char AutoStart=1;
 static unsigned char Qflag=0;
 static char CpuName[20]="CPUNAME";
 static char MmuName[20]="MMUNAME";
+static int showLeftJoystickValues = 0;
+static int showRightJoystickValues = 0;
 
 char QuickLoadFile[256];
 /***Forward declarations of functions included in this code module*****/
 
 static void SoftReset(void);
 void LoadIniFile(void);
-void EmuLoop(void);
-void CartLoad(void);
+void *EmuLoop(void *);
 void (*CPUInit)(void)=NULL;
 int  (*CPUExec)( int)=NULL;
 void (*CPUReset)(void)=NULL;
@@ -79,27 +79,33 @@ void (*MmuWrite8)(UINT8, UINT8, UINT16)=NULL;
 UINT8 (*MemRead8)(UINT16)=NULL;
 void (*MemWrite8)(UINT8, UINT16)=NULL;
 void (*SetDistoRamBank)(UINT8)=NULL;
-void FullScreenToggle(void);
 
 // Message handlers
 
 // Globals
 
+#ifdef _DEBUG
+# ifdef DARWIN
+FILE *logg;
+# endif
+#endif
+
 char *GlobalExecFolder;
 char *GlobalFullName;
 char *GlobalShortName;
 void HandleSDLevent(SDL_Event);
-void FullScreenToggleSDL(void);
-void InvalidateBoarderSDL(void);
+void FullScreenToggleAGAR(void);
+void InvalidateBoarderAGAR(void);
 
 static char g_szAppName[MAX_LOADSTRING] = "";
 bool BinaryRunning;
 static unsigned char FlagEmuStop=TH_RUNNING;
 
-static AG_DriverSDL2Ghost *sdl;
-
 void DecorateWindow(SystemState2 *);
+void AddDummyCartMenus(void);
+void RemoveDummyCartMenus(void);
 void PrepareEventCallBacks(SystemState2 *);
+void PadDummyCartMenus(void);
 
 /*--------------------------------------------------------------------------*/
 
@@ -108,6 +114,17 @@ int main(int argc, char **argv)
 {
 	char cwd[260];
 	char name[260];
+
+#ifdef _DEBUG
+# ifdef DARWIN
+	logg = fopen("./ovcc.log", "w");
+	if (!logg) {
+		fprintf(stderr, "Couldn't open ovcc.log\n");
+		return 1;
+	}
+	setbuf(logg, NULL);
+# endif
+#endif
 
 	if (getcwd(cwd, sizeof(cwd)) != NULL) {
 		GlobalExecFolder = cwd;
@@ -150,37 +167,23 @@ int main(int argc, char **argv)
 	EmuState2.WindowSize.x=640;
 	EmuState2.WindowSize.y=480;
 	
-	if (!CreateSDLWindow(&EmuState2))
+	if (!CreateAGARWindow(&EmuState2))
 	{
-		fprintf(stderr,"Can't create SDL Window\n");
+		fprintf(stderr,"Can't create AGAR Window\n");
 	}
 	
 	DecorateWindow(&EmuState2);
+
 	AG_WindowShow(EmuState2.agwin);
 
-    sdl = (AG_DriverSDL2Ghost *)((AG_Widget *)EmuState2.agwin)->drv;
-    EmuState2.Window = sdl->w;
-	// AGAR create an SDL Window with PRESENTVSYNC
-	// There is no way to pass custom flags when that occurs.
-	// So the renderer associated with the window must be destroyed 
-	// and and a new unsync'd renderer substituted in it's place
-	SDL_DestroyRenderer(sdl->r);
-	sdl->r = SDL_CreateRenderer(sdl->w, -1, SDL_RENDERER_ACCELERATED);
-    EmuState2.Renderer = sdl->r;
-	EmuState2.Texture = SDL_CreateTexture(sdl->r, sdl->f, SDL_TEXTUREACCESS_STREAMING, 640, 480);
     EmuState2.SurfacePitch = 640;
-
-	if (EmuState2.Texture == NULL)
-	{
-		fprintf(stderr, "Cannot create SDL Texture! : %s\n", SDL_GetError());
-		return (0);
-	}
 
 	PrepareEventCallBacks(&EmuState2);
 
-	ClsSDL(0, &EmuState2);
+	ClsAGAR(0, &EmuState2);
 
 	LoadConfig(&EmuState2);			//Loads the default config file Vcc.ini from the exec directory
+	PadDummyCartMenus();
 	EmuState2.ResetPending=2;
 	SetClockSpeed(1);	//Default clock speed .89 MHZ	
 	BinaryRunning = true;
@@ -199,18 +202,35 @@ int main(int argc, char **argv)
 	}
 
 	EmuState2.emuThread = threadID;
-	
+
+#ifdef ISOCPU
+	extern void *CPUloop(void *);
+	if (AG_ThreadTryCreate(&threadID, CPUloop, &EmuState2) != 0)
+	{
+		fprintf(stderr, "Can't Start CPU Thread!\n");
+		return(0);
+	}
+#endif
+
+	EmuState2.cpuThread = threadID;
+
+
     AG_EventLoop();
 	
-	//EmuState2.Pixels = NULL;
-	//EmuState2.Renderer = NULL;
-	//EmuState2.EmulationRunning = 0;
+	EmuState2.Pixels = NULL;
+	EmuState2.EmulationRunning = 0;
 
 	//AG_ThreadCancel(threadID);
 
 	//UnloadDll(0);
 	//SoundDeInitSDL();
 	//WriteIniFile(); //Save Any changes to ini FileS
+
+#ifdef _DEBUG
+# ifdef DARWIN
+	fclose(logg);
+# endif
+#endif
 
 	return 0;
 }
@@ -219,11 +239,13 @@ int main(int argc, char **argv)
 
 void DoHardResetF9()
 {
+    extern void SetStatusBarText(const char *, SystemState2 *);
+
 	//EmuState2.EmulationRunning=!EmuState2.EmulationRunning;
 	if ( EmuState2.EmulationRunning )
 		EmuState2.ResetPending=2;
 	else
-		SetStatusBarText("",&EmuState2);
+		SetStatusBarText("", &EmuState2);
 }
 
 void DoSoftReset()
@@ -236,7 +258,7 @@ void DoSoftReset()
 
 void ToggleMonitorType()
 {
-	SetMonitorTypeSDL(!SetMonitorTypeSDL(QUERY));
+	SetMonitorTypeAGAR(!SetMonitorTypeAGAR(QUERY));
 }
 
 void ToggleThrottleSpeed()
@@ -246,8 +268,8 @@ void ToggleThrottleSpeed()
 
 void ToggleScreenStatus()
 {
-	SetInfoBandSDL(!SetInfoBandSDL(QUERY));
-    InvalidateBoarderSDL();
+	SetInfoBandAGAR(!SetInfoBandAGAR(QUERY));
+    InvalidateBoarderAGAR();
 }
 
 void ToggleFullScreen()
@@ -256,12 +278,9 @@ void ToggleFullScreen()
 	{
 		FlagEmuStop = TH_REQWAIT;
 		EmuState2.FullScreen = !EmuState2.FullScreen;
+		FullScreenToggleAGAR();
+		FlagEmuStop = TH_RUNNING;
 	}
-}
-
-void DoKeyBoardEvent(unsigned short key, unsigned short scancode, unsigned short state)
-{
-	vccKeyboardHandleKeySDL(key, scancode, state);
 }
 
 void DoMouseMotion(int ex, int ey)
@@ -270,48 +289,35 @@ void DoMouseMotion(int ex, int ey)
 	{
 		int x = ex;
 		int y = ey;
-		x /= 10;
-		y /= 7.5;
+
 		joystickSDL(x,y);
 		//fprintf(stderr, "Mouse @ %i - %i\n", x, y);
 	}
 }
 
-void DoButton(int button, int state)
-{
-	switch (button)
-	{
-		case SDL_BUTTON_LEFT:
-			SetButtonStatusSDL(0, state);
-		break;
-
-		case SDL_BUTTON_RIGHT:
-			SetButtonStatusSDL(1, state);
-		break;
-	}
-}
-
 void SetCPUMultiplyerFlag (unsigned char double_speed)
 {
-	SetClockSpeed(1); 
+	unsigned short clockspeed = 1;
 	EmuState2.DoubleSpeedFlag=double_speed;
-	if (EmuState2.DoubleSpeedFlag)
-		SetClockSpeed( EmuState2.DoubleSpeedMultiplyer * EmuState2.TurboSpeedFlag);
 	EmuState2.CPUCurrentSpeed= .894;
 	if (EmuState2.DoubleSpeedFlag)
-		EmuState2.CPUCurrentSpeed*=(EmuState2.DoubleSpeedMultiplyer*EmuState2.TurboSpeedFlag);
+		clockspeed =  EmuState2.DoubleSpeedMultiplyer * EmuState2.TurboSpeedFlag;
+	if (EmuState2.DoubleSpeedFlag)
+		EmuState2.CPUCurrentSpeed *= (EmuState2.DoubleSpeedMultiplyer*EmuState2.TurboSpeedFlag);
+	SetClockSpeed(clockspeed); 
 	return;
 }
 
 void SetTurboMode(unsigned char data)
 {
+	unsigned short clockspeed = 1;
 	EmuState2.TurboSpeedFlag=(data&1)+1;
-	SetClockSpeed(1); 
 	if (EmuState2.DoubleSpeedFlag)
-		SetClockSpeed( EmuState2.DoubleSpeedMultiplyer * EmuState2.TurboSpeedFlag);
+		clockspeed = EmuState2.DoubleSpeedMultiplyer * EmuState2.TurboSpeedFlag;
 	EmuState2.CPUCurrentSpeed= .894;
 	if (EmuState2.DoubleSpeedFlag)
 		EmuState2.CPUCurrentSpeed*=(EmuState2.DoubleSpeedMultiplyer*EmuState2.TurboSpeedFlag);
+	SetClockSpeed(clockspeed); 
 	return;
 }
 
@@ -362,7 +368,12 @@ void DoHardReset(SystemState2* const HRState)
 		break;
 		case 1: // 6309
 		CPUInit=HD6309Init;
-		CPUExec=HD6309Exec;
+		switch (HRState->MouseType) // Mouse type determines which CPU exec we use
+		{
+			case 0: CPUExec=HD6309Exec; /* fprintf(stdout, "CPU Exec\n"); */ break;
+			case 1: CPUExec=HD6309ExecHiRes; /* fprintf(stdout, "CPU Exec Hi-Res\n"); */ break;
+			default: CPUExec=HD6309Exec; /* fprintf(stdout, "CPU Exec\n"); */ break;
+		}
 		CPUReset=HD6309Reset;
 		CPUAssertInterupt=HD6309AssertInterupt;
 		CPUDeAssertInterupt=HD6309DeAssertInterupt;
@@ -374,9 +385,9 @@ void DoHardReset(SystemState2* const HRState)
 	mc6883_reset();	//Captures interal rom pointer for CPU Interupt Vectors
 	CPUInit();
 	CPUReset();		// Zero all CPU Registers and sets the PC to VRESET
-	GimeResetSDL();
+	GimeResetAGAR();
 	UpdateBusPointer();
-	EmuState2.TurboSpeedFlag=1;
+	EmuState2.DoubleSpeedFlag=0;
 	EmuState2.TurboSpeedFlag=1;
 	ResetBus();
 	SetClockSpeed(1);
@@ -388,7 +399,7 @@ static void SoftReset(void)
 	mc6883_reset(); 
 	PiaReset();
 	CPUReset();
-	GimeResetSDL();
+	GimeResetAGAR();
 	MmuReset();
 	CopyRom();
 	ResetBus();
@@ -496,7 +507,7 @@ void SetMMUStat(unsigned char mmu)
 	}
 }
 
-void EmuLoop(void)
+void *EmuLoop(void *p)
 {
 	static float FPS;
 	static unsigned int FrameCounter=0;	
@@ -543,19 +554,19 @@ void EmuLoop(void)
 				case 2:	//Hard Reset
 					//printf("hard reset\n");
 					UpdateConfig();
-					DoClsSDL(&EmuState2);
+					DoClsAGAR(&EmuState2);
 					DoHardReset(&EmuState2);
 					break;
 
 				case 3:
 					//printf("docls\n");
-					DoClsSDL(&EmuState2);
+					DoClsAGAR(&EmuState2);
 					break;
 
 				case 4:
 					//printf("upd conf\n");
 					UpdateConfig();
-					DoClsSDL(&EmuState2);
+					DoClsAGAR(&EmuState2);
 					break;
 
 				default:
@@ -567,51 +578,82 @@ void EmuLoop(void)
 			if (EmuState2.EmulationRunning == 1) {
 				FPS += RenderFrame(&EmuState2, LC);
 			} else {
-				FPS += StaticSDL(&EmuState2);
+				FPS += StaticAGAR(&EmuState2);
 			}
 		}
 
 		EndRender(EmuState2.FrameSkip);
-		FPS= FPS != 0 ? FPS/EmuState2.FrameSkip : GetCurrentFPS()/EmuState2.FrameSkip;
+		FPS = FPS != 0.0 ? FPS/EmuState2.FrameSkip : GetCurrentFPS()/EmuState2.FrameSkip;
 		GetModuleStatus(&EmuState2);
 
-		// if (++framecnt == 6)
-		// {
-			sprintf(ttbuff,"Skip:%2.2i|FPS:%3.0f|%s%s%s@%3.2fMhz|%s",EmuState2.FrameSkip,FPS,CpuName,NatEmuStat,MMUStat,EmuState2.CPUCurrentSpeed,EmuState2.StatusLine);
-			SetStatusBarText(ttbuff,&EmuState2);
-			//fprintf(stderr, "|");
-		// 	framecnt = 0;
-		// }
+		// Update status bar
 
-		if (Throttle )	//Do nothing until the frame is over returning unused time to OS
+		char tmpbuf[256];
+		sprintf(ttbuff, "FPS:%3.0f|%s%s%s@%3.2fMhz", FPS,CpuName,NatEmuStat,MMUStat,EmuState2.CPUCurrentSpeed);
+
+		if(showLeftJoystickValues)
+		{
+			extern void GetLeftJoystickValues(int*, int*);
+			int joyx, joyy;
+			strcpy(tmpbuf, ttbuff);
+			GetLeftJoystickValues(&joyx, &joyy);
+			sprintf(ttbuff,"%s|LX:%3d-LY:%3d", tmpbuf, joyx,joyy);
+		}
+
+		if(showRightJoystickValues)
+		{
+			extern void GetRightJoystickValues(int*, int*);
+			int joyx, joyy;
+			strcpy(tmpbuf, ttbuff);
+			GetRightJoystickValues(&joyx, &joyy);
+			sprintf(ttbuff,"%s|RX:%3d-RY:%3d", tmpbuf, joyx,joyy);
+		}
+
+		strcpy(tmpbuf, ttbuff);
+		sprintf(ttbuff,"%s|%s", tmpbuf,EmuState2.StatusLine);
+    	extern void SetStatusBarText(const char *, SystemState2 *);
+		SetStatusBarText(ttbuff, &EmuState2);
+
+#ifndef ISOCPU
+		if (Throttle)	//Do nothing until the frame is over returning unused time to OS
 		{
     		//fprintf(stderr, "4(%2.3f)", timems());
 			FrameWait();
     		//fprintf(stderr, "5(%2.3f)-", timems());
 		}
+#endif
 	} //Still Emulating
-	return;
+	return(p);
 }
 
-void FullScreenToggleSDL(void)
+void FullScreenToggleAGAR(void)
 {
-	bool SDLrecreateTexture(SystemState2*);
-
 	EmuState2.EmulationRunning = 0;
 	PauseAudioSDL(true);
 
 	if (EmuState2.FullScreen)
 	{	
-		SDL_SetWindowFullscreen(EmuState2.Window, SDL_WINDOW_FULLSCREEN_DESKTOP);
+		AG_WindowMaximize(EmuState2.agwin);
+		//AG_WindowUnmaximize(EmuState2.agwin);
 	}
 	else{
-		SDL_SetWindowFullscreen(EmuState2.Window, 0);
+		AG_WindowMinimize(EmuState2.agwin);
+		AG_WindowUnminimize(EmuState2.agwin);
 	}
 
 	EmuState2.Resizing = 0;
 	EmuState2.EmulationRunning = 1;
-	InvalidateBoarderSDL();
-	EmuState2.ConfigDialog=NULL;
+	InvalidateBoarderAGAR();
 	PauseAudioSDL(false);
 	return;
+}
+
+void SetShowLeftJoystickValue(int showJoystickVal)
+{
+	showLeftJoystickValues = showJoystickVal;
+}
+
+void SetShowRightJoystickValue(int showJoystickVal)
+{
+	showRightJoystickValues = showJoystickVal;
 }

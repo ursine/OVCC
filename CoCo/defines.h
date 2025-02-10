@@ -76,6 +76,12 @@ extern void (*CPUForcePC)(unsigned short);
 extern void _MessageBox(const char *);
 extern char *GlobalExecFolder;
 
+#ifdef _DEBUG
+# ifdef DARWIN
+extern FILE *logg;
+# endif
+#endif
+
 typedef struct _tagPOINT
 {
     long x;
@@ -85,12 +91,9 @@ typedef struct _tagPOINT
 typedef struct 
 {
     AG_Window       *agwin;
-    AG_Fixed        *fx;
-    SDL_Window		*Window;
-    SDL_Renderer	*Renderer;
-    AG_Window       *ConfigDialog;
+    AG_Pixmap       *fx;
     AG_Thread       emuThread;
-    SDL_Texture		*Texture;
+    AG_Thread       cpuThread;
     Uint16          Rendering;
     Uint16          Resizing;
     void            *Pixels;
@@ -103,6 +106,7 @@ typedef struct
     unsigned char	TurboSpeedFlag;
     unsigned char	CpuType;
     unsigned char	MmuType;
+    unsigned char	MouseType;
     unsigned char	FrameSkip;
     unsigned char	BitDepth;
     unsigned char	*PTRsurface8;

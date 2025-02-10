@@ -15,12 +15,12 @@ This file is part of VCC (Virtual Color Computer).
     You should have received a copy of the GNU General Public License
     along with VCC (Virtual Color Computer).  If not, see <http://www.gnu.org/licenses/>.
 */
-/********************************************************************************************
-*	fd502.cpp : Defines the entry point for the DLL application.							*
-*	DLL for use with Vcc 1.0 or higher. DLL interface 1.0 Beta								* 
-*	This Module will emulate a Tandy Floppy Disk Model FD-502 With 3 DSDD drives attached	* 
-*	Copyright 2006 (c) by Joseph Forgione 													*
-*********************************************************************************************/
+/************************************************************************************************
+*	fd502.cpp : Defines the entry point for the DLL application.				*
+*	DLL for use with Vcc 1.0 or higher. DLL interface 1.0 Beta				*
+*	This Module will emulate a Tandy Floppy Disk Model FD-502 With 3 DSDD drives attached	*
+*	Copyright 2006 (c) by Joseph Forgione 							*
+*************************************************************************************************/
 
 #include <agar/core.h>
 #include <agar/gui.h>
@@ -132,16 +132,27 @@ void ADDCALL ModuleConfig(unsigned char func)
 	{
 		int drv;
 
-		AG_MenuDel(itemConfig);
+		if (itemConfig)
+			AG_MenuDel(itemConfig);
+		itemConfig = NULL;
 
 		for (drv = 0 ; drv < MAX_DRIVES ; drv++)
 		{
-			AG_MenuDel(itemEjectFD[drv]);
-			AG_MenuDel(itemLoadFD[drv]);
-			AG_MenuDel(itemMenu[drv]);
+			if (itemEjectFD[drv])
+				AG_MenuDel(itemEjectFD[drv]);
+			itemEjectFD[drv] = NULL;
+			if (itemLoadFD[drv])
+				AG_MenuDel(itemLoadFD[drv]);
+			itemLoadFD[drv] = NULL;
+			if (itemMenu[drv])
+				AG_MenuDel(itemMenu[drv]);
+			itemMenu[drv] = NULL;
 		}
 
-		AG_MenuDel(itemSeperator);
+		if (itemSeperator)
+			AG_MenuDel(itemSeperator);
+		itemSeperator = NULL;
+
 	}
 	break;
 
@@ -290,29 +301,27 @@ void PhysDriveASelected(AG_Event *event)
 {
   AG_TlistItem *ti = AG_PTR(1);
 
-  PhysicalDriveA = ti->label;
+  PhysicalDriveA = ti->u;
 }
 
 void PhysDriveBSelected(AG_Event *event)
 {
     AG_TlistItem *ti = AG_PTR(1);
 
-    PhysicalDriveB = ti->label;	
+    PhysicalDriveB = ti->u;	
 }
 
-int UpdateROM(AG_Event *event)
+void UpdateROM(AG_Event *event)
 {
 	char *file = AG_STRING(1);
 	AG_FileType *ft = AG_PTR(2);
 
 	AG_Strlcpy(TempRomFileName, file, sizeof(TempRomFileName));
-
-    return 0;
 }
 
 void BrowseROM(AG_Event *event)
 {
-    AG_Window *fdw = AG_WindowNew(AG_WINDOW_DIALOG);
+    AG_Window *fdw = AG_WindowNew(0);
     AG_WindowSetCaption(fdw, "Disk Rom Image");
     AG_WindowSetGeometryAligned(fdw, AG_WINDOW_ALIGNMENT_NONE, 500, 500);
     AG_WindowSetCloseAction(fdw, AG_WINDOW_DETACH);
@@ -324,13 +333,24 @@ void BrowseROM(AG_Event *event)
     AG_WindowShow(fdw);
 }
 
-void PopulateDriveDevices(AG_Tlist *list)
+void PopulateDriveDevices(AG_Event *event)
 {
-    AG_TlistAddS(list, NULL, "None");
-    AG_TlistAddS(list, NULL, "Drive 0");
-    AG_TlistAddS(list, NULL, "Drive 1");
-    AG_TlistAddS(list, NULL, "Drive 2");
-    AG_TlistAddS(list, NULL, "Drive 3");
+    AG_Combo *com = AG_COMBO_SELF(); 
+
+	AG_ComboSizeHint(com, "Drive 0", 5);
+    AG_TlistItem *item = AG_TlistAddS(com->list, NULL, "None");
+	item->u = 0;
+    AG_TlistAddS(com->list, NULL, "Drive 0");
+	item->u = 1;
+    AG_TlistAddS(com->list, NULL, "Drive 1");
+	item->u = 2;
+    AG_TlistAddS(com->list, NULL, "Drive 2");
+	item->u = 3;
+    AG_TlistAddS(com->list, NULL, "Drive 3");
+	item->u = 4;
+
+	item = AG_TlistFindByIndex(com->list, PhysicalDriveA);
+	if (item != NULL) AG_ComboSelect(com, item);
 }
 
 void ConfigFD502(AG_Event *event)
@@ -342,7 +362,7 @@ void ConfigFD502(AG_Event *event)
         return;
     }
 
-    AG_WindowSetGeometryAligned(win, AG_WINDOW_ALIGNMENT_NONE, 440, 294);
+    AG_WindowSetGeometryAligned(win, AG_WINDOW_ALIGNMENT_NONE, 454, 344);
     AG_WindowSetCaptionS(win, "FD-502 Config");
     AG_WindowSetCloseAction(win, AG_WINDOW_DETACH);
 
@@ -395,18 +415,12 @@ void ConfigFD502(AG_Event *event)
 	AG_LabelNew(vbox, 0, "Physical Disks");
 
 	com = AG_ComboNewS(vbox, AG_COMBO_HFILL, "A:");
-	AG_ComboSizeHint(com, "Drive 0", 5);
-	PopulateDriveDevices(com->list);
-	item = AG_TlistFindByIndex(com->list, PhysicalDriveA);
-	if (item != NULL) AG_ComboSelect(com, item);
+	AG_SetEvent(com, "combo-expanded", PopulateDriveDevices, NULL);
 	AG_SetEvent(com, "combo-selected", PhysDriveASelected, NULL);
 	if (RealDisks) AG_WidgetEnable(com); else AG_WidgetDisable(com);
 
 	com = AG_ComboNewS(vbox, AG_COMBO_HFILL, "B:");
-	AG_ComboSizeHint(com, "Drive 0", 5);
-	PopulateDriveDevices(com->list);
-	item = AG_TlistFindByIndex(com->list, PhysicalDriveB);
-	if (item != NULL) AG_ComboSelect(com, item);
+	AG_SetEvent(com, "combo-expanded", PopulateDriveDevices, NULL);
 	AG_SetEvent(com, "combo-selected", PhysDriveBSelected, NULL);
 	if (RealDisks) AG_WidgetEnable(com); else AG_WidgetDisable(com);
 
@@ -566,7 +580,7 @@ void UnloadFD502(AG_Event *event)
 	UpdateMenu(disk);
 }
 
-int LoadFD502(AG_Event *event)
+void LoadFD502(AG_Event *event)
 {
 	int disk = AG_INT(1);
 	char *file = AG_STRING(2);
@@ -589,9 +603,9 @@ void BrowseFD502(AG_Event *event)
 {
 	int disk = AG_INT(1);
 	
-    AG_Window *fdw = AG_WindowNew(AG_WINDOW_DIALOG);
+    AG_Window *fdw = AG_WindowNew(0);
     AG_WindowSetCaption(fdw, "Insert FD Image");
-    AG_WindowSetGeometryAligned(fdw, AG_WINDOW_ALIGNMENT_NONE, 500, 500);
+    AG_WindowSetGeometryAligned(fdw, AG_WINDOW_ALIGNMENT_NONE, 650, 500);
     AG_WindowSetCloseAction(fdw, AG_WINDOW_DETACH);
 
     AG_FileDlg *fd = AG_FileDlgNew(fdw, AG_FILEDLG_EXPAND | AG_FILEDLG_CLOSEWIN | AG_FILEDLG_MASK_EXT);
@@ -627,8 +641,9 @@ void BuildMenu(void)
 		}
 	}
 
-	itemConfig = AG_MenuNode(menuAnchor, "FD-502 Config", NULL);
-	AG_MenuAction(itemConfig, "Config", NULL, ConfigFD502, NULL);
+	//itemConfig = AG_MenuNode(menuAnchor, "FD-502 Config", NULL);
+	//AG_MenuAction(itemConfig, "Config", NULL, ConfigFD502, NULL);
+	itemConfig = AG_MenuAction(menuAnchor, "FD-502 Config", NULL, ConfigFD502, NULL);
 }
 
 long CreateDiskHeader(char *FileName, unsigned char Type, unsigned char Tracks, unsigned char DblSided)

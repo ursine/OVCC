@@ -19,7 +19,7 @@ This file is part of VCC (Virtual Color Computer).
 #include "stdio.h"
 #include <math.h>
 #include "defines.h"
-#include "tcc1014graphicsSDL.h"
+#include "tcc1014graphicsAGAR.h"
 #include "tcc1014registers.h"
 #include "mc6821.h"
 #include "hd6309.h"
@@ -31,6 +31,7 @@ This file is part of VCC (Virtual Color Computer).
 #include "vcc.h"
 #include "cassette.h"
 #include "logger.h"
+#include "AGARInterface.h"
 
 //****************************************
 	static double SoundInterupt=0;
@@ -76,6 +77,7 @@ int CPUCycle(void);
 static unsigned long DC;
 static long LC;
 
+#ifndef ISOCPU
 float RenderFrame (SystemState2 *RFState2, unsigned long DCnt)
 {
 	static unsigned short FrameCounter = 0;
@@ -85,7 +87,7 @@ float RenderFrame (SystemState2 *RFState2, unsigned long DCnt)
 	LC = 0;
 
 //********************************Start of frame Render*****************************************************
-	SetBlinkStateSDL(BlinkPhase);
+	SetBlinkStateAGAR(BlinkPhase);
 	irq_fs(0);				//FS low to High transition start of display Boink needs this
 	for (RFState2->LineCounter=0;RFState2->LineCounter<13;RFState2->LineCounter++)		//Vertical Blanking 13 H lines 
 		CPUCycle();
@@ -93,16 +95,11 @@ float RenderFrame (SystemState2 *RFState2, unsigned long DCnt)
 	for (RFState2->LineCounter=0;RFState2->LineCounter<4;RFState2->LineCounter++)		//4 non-Rendered top Boarder lines
 		CPUCycle();
 
-	if (!(FrameCounter % RFState2->FrameSkip))
-	{	
-		if (LockScreenSDL(RFState2))
-			return(0);
-	}
 	for (RFState2->LineCounter=0;RFState2->LineCounter<(TopBoarder-4);RFState2->LineCounter++) 		
 	{
 		if (!(FrameCounter % RFState2->FrameSkip)) 
 		{
-			DrawTopBoarderSDL(RFState2);
+			DrawTopBoarderAGAR(RFState2);
 		}
 		CPUCycle();
 	}
@@ -112,7 +109,7 @@ float RenderFrame (SystemState2 *RFState2, unsigned long DCnt)
 		CPUCycle();
 		if (!(FrameCounter % RFState2->FrameSkip))
 		{
-			UpdateScreenSDL(RFState2);
+			UpdateScreen(RFState2);
 		}
 	} 
 	irq_fs(1);  //End of active display FS goes High to Low
@@ -123,14 +120,14 @@ float RenderFrame (SystemState2 *RFState2, unsigned long DCnt)
 		CPUCycle();
 		if (!(FrameCounter % RFState2->FrameSkip))
 		{
-			DrawBottomBoarderSDL(RFState2);
+			DrawBottomBoarderAGAR(RFState2);
 		}
 	}
 
 	if (!(FrameCounter % RFState2->FrameSkip))
 	{
-		UnlockScreenSDL(RFState2);
-		SetBoarderChangeSDL(0);
+		UpdateAGAR(RFState2);
+		SetBoarderChangeAGAR(0);
 	}
 
 	for (RFState2->LineCounter=0;RFState2->LineCounter<6;RFState2->LineCounter++)		//Vertical Retrace 6 H lines
@@ -153,6 +150,152 @@ float RenderFrame (SystemState2 *RFState2, unsigned long DCnt)
 
 	return(CalculateFPS());
 }
+#else
+static volatile int waitsync=1;
+static long   lPicosPerLine = PICOSECOND / (TARGETFRAMERATE * LINESPERSCREEN);
+
+float RenderFrame (SystemState2 *RFState2, unsigned long DCnt)
+{
+	long long frametime = 16666667;
+	static unsigned short FrameCounter = 0;
+	unsigned long long StartTime, EndTime, TargetTime;
+    static volatile long finetune=0;
+	//WriteLog("RF ", TOCONS);
+	//fprintf(stderr, ".");
+	DC = DCnt;
+	LC = 0;
+
+//********************************Start of frame Render*****************************************************
+	SetBlinkStateAGAR(BlinkPhase);
+	irq_fs(0);				//FS low to High transition start of display Boink needs this
+	waitsync = 0; // release the cpu
+
+	FrameCounter = (FrameCounter+1) % RFState2->FrameSkip;
+
+    StartTime=SDL_GetPerformanceCounter(); // used to calc frame time
+
+	for (RFState2->LineCounter=0;RFState2->LineCounter<13;RFState2->LineCounter++)		//Vertical Blanking 13 H lines 
+	{
+		TargetTime = SDL_GetPerformanceCounter() + lPicosPerLine - finetune;
+		EndTime = SDL_GetPerformanceCounter();
+		while(EndTime < TargetTime) { EndTime = SDL_GetPerformanceCounter(); }
+	}
+
+	for (RFState2->LineCounter=0;RFState2->LineCounter<4;RFState2->LineCounter++)		//4 non-Rendered top Boarder lines
+	{
+		TargetTime = SDL_GetPerformanceCounter() + lPicosPerLine - finetune;
+		EndTime = SDL_GetPerformanceCounter();
+		while(EndTime < TargetTime) { EndTime = SDL_GetPerformanceCounter(); }
+	}
+
+	for (RFState2->LineCounter=0;RFState2->LineCounter<(TopBoarder-4);RFState2->LineCounter++) 		// Top boarder
+	{
+		TargetTime = SDL_GetPerformanceCounter() + lPicosPerLine - finetune;
+		if (!FrameCounter) { DrawTopBoarderAGAR(RFState2); }
+		EndTime = SDL_GetPerformanceCounter();
+		while(EndTime < TargetTime) { EndTime = SDL_GetPerformanceCounter(); }
+	}
+
+	for (RFState2->LineCounter=0;RFState2->LineCounter<LinesperScreen;RFState2->LineCounter++)		//Active Display area		
+	{
+		TargetTime = SDL_GetPerformanceCounter() + lPicosPerLine - finetune;
+		if (!FrameCounter) { UpdateScreen(RFState2); }
+		EndTime = SDL_GetPerformanceCounter();
+		while(EndTime < TargetTime) { EndTime = SDL_GetPerformanceCounter(); }
+	} 
+
+	irq_fs(1);  //End of active display FS goes High to Low
+	if (VertInteruptEnabled)
+	{
+		GimeAssertVertInterupt();	
+	}
+
+	for (RFState2->LineCounter=0;RFState2->LineCounter < (BottomBoarder) ;RFState2->LineCounter++)	// Bottom boarder 
+	{
+		TargetTime = SDL_GetPerformanceCounter() + lPicosPerLine - finetune;
+		if (!FrameCounter) { DrawBottomBoarderAGAR(RFState2); }
+		EndTime = SDL_GetPerformanceCounter();
+		while(EndTime < TargetTime) { EndTime = SDL_GetPerformanceCounter(); }
+	}
+
+	if (!FrameCounter)
+	{
+		UpdateAGAR(RFState2);
+		SetBoarderChangeAGAR(0);
+	}
+
+	for (RFState2->LineCounter=0;RFState2->LineCounter<6;RFState2->LineCounter++)		//Vertical Retrace 6 H lines
+	{
+		TargetTime = SDL_GetPerformanceCounter() + lPicosPerLine - finetune;
+		EndTime = SDL_GetPerformanceCounter();
+		while(EndTime < TargetTime) { EndTime = SDL_GetPerformanceCounter(); }
+	}
+
+	// frametime = EndTime - StartTime;
+	// if (frametime < 16666667) finetune--; else finetune++;
+	//fprintf(stderr, "<%lld:%d>", frametime, finetune);
+
+	switch (SoundOutputMode)
+	{
+	case 0:
+		FlushAudioBufferSDL(AudioBuffer,AudioIndex<<2);
+		break;
+	case 1:
+		FlushCassetteBuffer(CassBuffer,AudioIndex);
+		break;
+	case 2:
+		LoadCassetteBuffer(CassBuffer);
+
+		break;
+	}
+	AudioIndex=0;
+
+	float fps = CalculateFPS();
+
+	if (fps > 0.1)
+	{
+		finetune+=(60.0 - fps) * 10.0;
+	}
+
+	//fprintf(stderr, "fps %2.1f - ft %ld - i %d\n", fps, finetune, fineinc);
+
+	return(fps);
+}
+
+void *CPUloop (void *p)
+{
+	SystemState2 *RFState2 = p;
+	long long cputime = 16666667;
+	unsigned long long StartTime, EndTime, TargetTime;
+	long timeavg, finetune=0;
+	short lc;
+
+	while (CPUExec == NULL) { AG_Delay(1); } // The Render loop resets the system and the CPU must wait for reset 1st time;
+
+	while(1)
+	{
+		while(waitsync) {} waitsync=1; // sync with RenderFrame()
+		timeavg = 0;
+		StartTime = SDL_GetPerformanceCounter();
+		// total iterations = 13 blanking lines + 4 non boarder lines + TopBoarder-4 lines + Active display lines + Bottom boarder lines + 6 vertical retrace lines
+		// or TopBoarder + LinesPerScreen + Bottom Boarder + 19
+		for(lc=0 ; lc < TopBoarder+LinesperScreen+BottomBoarder+19 ; lc++)
+		{
+			TargetTime = SDL_GetPerformanceCounter() + lPicosPerLine - finetune;
+			CPUCycle();
+			EndTime = SDL_GetPerformanceCounter();
+			timeavg += TargetTime - EndTime;
+			while(EndTime < TargetTime) { EndTime = SDL_GetPerformanceCounter(); }
+		}
+		timeavg /= lc;
+		if (timeavg < 0) CPUConfigSpeedDec(); else if (timeavg > 0) CPUConfigSpeedInc();
+		cputime = EndTime - StartTime;
+		if (cputime < 16666667) finetune--; else finetune++;
+		//fprintf(stderr, "<%lld:%d>", cputime, finetune);
+	}
+	return(RFState2);
+}
+#endif
 
 void SetClockSpeed(unsigned short Cycles)
 {
@@ -181,6 +324,27 @@ void SetLinesperScreen (unsigned char Lines)
 	return;
 }
 
+void SelectCPUExec(SystemState2* EmuState)
+{
+	if(EmuState->CpuType == 1) // 6309
+	{
+		switch(EmuState->MouseType)
+		{
+			case 0: // for normal mouse
+				CPUExec = HD6309Exec;
+				//fprintf(stdout, "CPU Exec\n");
+				break;
+			
+			case 1: // for Hires mouse
+				CPUExec = HD6309ExecHiRes;
+				//fprintf(stdout, "CPU Exec Hi-Res\n");
+				break;
+
+			default:
+				break;
+		}
+	}
+}
 
 int CPUCycle(void)	
 {
